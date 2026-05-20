@@ -439,22 +439,32 @@ class _Builder:
                 self._resource(n, rc) for n, rc in self.config.resources.items()
             ],
         )
+        # Normalize user-declared shared models. Configs use either the
+        # bare component name (`references: Reference`) or the full $ref
+        # string (`acme_widget_id_string: "#/components/schemas/..."`) —
+        # both are valid Stainless surface and produce the same shape
+        # downstream.
+        shared = {
+            _strip_ref(mc.openapi_ref): key
+            for key, mc in self.config.shared_models.items()
+            if mc.openapi_ref
+        }
+        # Auto-promote the most-frequently-referenced 4XX error schema to
+        # the `error_object` shared model — matches Stainless's convention
+        # (oracle: openai-python emits `openai.types.shared.ErrorObject`
+        # auto-derived from the spec's error schema). Skipped if the user
+        # explicitly declared one.
+        if "error_object" not in shared.values():
+            err = self._auto_detect_error_schema(root)
+            if err is not None and err not in shared:
+                shared[err] = "error_object"
         return API(
             name=self.config.organization.name or info.get("title", "api"),
             version=str(info.get("version", "0.0.0")),
             environments=self._environments(),
             auth=self._auth(),
             models=self._models(),
-            shared_models={
-                # Normalize: configs use either the bare component name
-                # (`references: Reference`) or the full $ref string
-                # (`acme_widget_id_string: "#/components/schemas/..."`) —
-                # both are valid Stainless surface and produce the same
-                # shape downstream.
-                _strip_ref(mc.openapi_ref): key
-                for key, mc in self.config.shared_models.items()
-                if mc.openapi_ref
-            },
+            shared_models=shared,
             custom_casings=dict(self.config.custom_casings),
             python_package_name=(
                 self.config.targets.get("python").package_name
@@ -462,6 +472,92 @@ class _Builder:
                 else None
             ),
             root=root,
+        )
+
+    def _auto_detect_error_schema(self, root: Resource) -> str | None:
+        """Pick the schema most often referenced from 4XX/default
+        responses in the OpenAPI spec. We scan the spec directly (not
+        the IR) so the detection is independent of which subset of ops
+        the user happens to configure.
+
+        Heuristics:
+          1. Require ≥2 references — a one-off error isn't a "common" type.
+          2. If a candidate is a single-field wrapper (`{error: $ref X}`),
+             unwrap to X. Real openai spec has `ErrorResponse = {error:
+             $ref Error}`; user wants `Error`, not the wrapper.
+          3. Among candidates, prefer ones with an error-like shape
+             (`message` field plus at least one of `code` / `type` /
+             `param`). Falls back to most-referenced if none match.
+
+        Stainless's convention is to expose this as `<pkg>.types.shared
+        .ErrorObject`. We promote into `shared_models` with key
+        `error_object`; the existing emitter machinery handles the rest.
+        """
+        counts: dict[str, int] = {}
+        prefix = "#/components/schemas/"
+        for _path, item in (self.doc.raw.get("paths") or {}).items():
+            if not isinstance(item, dict):
+                continue
+            for verb in ("get", "post", "put", "patch", "delete"):
+                op = item.get(verb)
+                if not isinstance(op, dict):
+                    continue
+                for status, resp in (op.get("responses") or {}).items():
+                    s = str(status)
+                    if not (s.startswith("4") or s == "default"):
+                        continue
+                    if not isinstance(resp, dict):
+                        continue
+                    schema = (
+                        (resp.get("content") or {})
+                        .get("application/json", {})
+                        .get("schema")
+                    ) or {}
+                    ref = schema.get("$ref") if isinstance(schema, dict) else None
+                    if isinstance(ref, str) and ref.startswith(prefix):
+                        name = ref[len(prefix):]
+                        counts[name] = counts.get(name, 0) + 1
+        if not counts:
+            return None
+        schemas = self.doc.schemas
+        # Order by frequency desc, then name. Unwrap single-field
+        # wrappers; among ≥2-ref candidates prefer ones whose shape
+        # looks like an error.
+        ordered = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
+        # First pass: candidates with the error-like shape (after unwrap).
+        for name, count in ordered:
+            if count < 2:
+                break
+            inner = self._unwrap_error_wrapper(name, schemas)
+            if self._is_error_shape(inner, schemas):
+                return inner
+        # Fallback: the most-referenced ≥2 candidate (unwrapped if a wrapper).
+        for name, count in ordered:
+            if count < 2:
+                break
+            return self._unwrap_error_wrapper(name, schemas)
+        return None
+
+    @staticmethod
+    def _unwrap_error_wrapper(name: str, schemas: dict) -> str:
+        """`{error: $ref Inner}` → `Inner`; otherwise unchanged."""
+        prefix = "#/components/schemas/"
+        s = schemas.get(name) or {}
+        props = (s.get("properties") if isinstance(s, dict) else None) or {}
+        if len(props) == 1 and "error" in props:
+            inner = props["error"]
+            ref = inner.get("$ref") if isinstance(inner, dict) else None
+            if isinstance(ref, str) and ref.startswith(prefix):
+                return ref[len(prefix):]
+        return name
+
+    @staticmethod
+    def _is_error_shape(name: str, schemas: dict) -> bool:
+        s = schemas.get(name) or {}
+        props = (s.get("properties") if isinstance(s, dict) else None) or {}
+        return (
+            "message" in props
+            and any(k in props for k in ("code", "type", "param"))
         )
 
 
