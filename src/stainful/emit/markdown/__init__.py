@@ -18,7 +18,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from stainful.emit.python._casing import package, pascal, pascal_singular_last, snake
+from stainful.emit.python._casing import (
+    package,
+    pascal,
+    pascal_singular_last,
+    set_user_casings,
+    snake,
+)
 from stainful.ir.model import API, Method, Resource
 from stainful.ir.types import (
     AnyType,
@@ -40,8 +46,9 @@ def emit_docs(api: API, out_path: str) -> None:
 
 class _DocsEmitter:
     def __init__(self, api: API) -> None:
+        set_user_casings(api.custom_casings)
         self.api = api
-        self.pkg = package(api.name)
+        self.pkg = api.python_package_name or package(api.name)
 
     # ----- top-level render -------------------------------------------------
     def render(self) -> str:

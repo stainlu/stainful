@@ -42,6 +42,12 @@ def _cap_token(p: str) -> str:
 
 
 def pascal(name: str) -> str:
+    # User override (custom_casings) wins outright — the whole-name version.
+    # We look up the snake-cased input; that's the canonical form Stainless
+    # configs use (`openai_id_string: OpenAIIDString`).
+    override = _USER_CASINGS.get(snake(name))
+    if override is not None:
+        return override
     parts = _NON_ALNUM.split(_CAMEL_2.sub(r"\1_\2", name))
     return "".join(_cap_token(p) for p in parts if p)
 
@@ -84,17 +90,31 @@ def singularize(word: str) -> str:
 
 
 # Compound brand names that bake an initialism into one lowercase token —
-# real Stainless `custom_casings` territory. We don't ship custom_casings
-# (v1.1 backlog), so the well-known compounds are hardcoded here. Heuristic
-# auto-splitting on initialism suffixes would over-match real English words
-# (`chai`, `tai`, `media` → `MediA`, ...), which is exactly why Stainless
-# requires the user to declare these explicitly.
+# the well-known cases shipped as a default. Users declare additional
+# overrides via `custom_casings:` in stainless.yml — those go into
+# `_USER_CASINGS` below and take precedence here AND inside `pascal()`.
+# Heuristic auto-splitting on initialism suffixes would over-match real
+# English words (`chai`, `tai`, `media` → `MediA`, …), which is exactly
+# why Stainless makes users declare these explicitly.
 _COMPOUND_BRANDS = {
     "openai": "OpenAI",
     "openapi": "OpenAPI",
     "anthropic": "Anthropic",
     "cloudflare": "Cloudflare",
 }
+
+# Per-generation user overrides from `custom_casings:` in stainless.yml.
+# Populated by the emitter at the start of an emit() pass via
+# `set_user_casings(...)`; consulted by `pascal()` and `brand()` before
+# heuristics. Module-level (process-global) by design — `emit()` is single-
+# threaded and clears between runs.
+_USER_CASINGS: dict[str, str] = {}
+
+
+def set_user_casings(casings: dict[str, str] | None) -> None:
+    """Install user-declared casings for the duration of an emit() pass."""
+    global _USER_CASINGS
+    _USER_CASINGS = dict(casings or {})
 
 
 def brand(api_name: str) -> str:
@@ -103,14 +123,24 @@ def brand(api_name: str) -> str:
     The client class name is a *symbol-level drop-in contract*: a user's
     `from onebusaway import OnebusawaySDK` must keep compiling. `sdk` is kept
     and upper-cased as an initialism, NOT stripped.
+
+    Resolution order: `custom_casings` whole-name override → per-token
+    compound-brand defaults → initialism set → standard PascalCase.
     """
+    # Whole-name custom_casings wins outright.
+    override = _USER_CASINGS.get(snake(api_name))
+    if override is not None:
+        return override
     tokens = _NON_ALNUM.split(_CAMEL_2.sub(r"\1_\2", api_name))
     out = []
     for tok in tokens:
         if not tok:
             continue
         low = tok.lower()
-        if low in _COMPOUND_BRANDS:
+        # Per-token user override (e.g. someone declared `inputs: Inputs`).
+        if low in _USER_CASINGS:
+            out.append(_USER_CASINGS[low])
+        elif low in _COMPOUND_BRANDS:
             out.append(_COMPOUND_BRANDS[low])         # openai -> OpenAI
         elif low in _INITIALISMS:
             out.append(tok.upper())

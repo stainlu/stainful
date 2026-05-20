@@ -27,7 +27,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from stainful.emit.python._casing import brand, package, snake
+from stainful.emit.python._casing import brand, package, set_user_casings, snake
 from stainful.ir.model import (
     API,
     ContentType,
@@ -62,8 +62,9 @@ def emit_mcp(api: API, out_path: str) -> None:
 
 class _MCPEmitter:
     def __init__(self, api: API) -> None:
+        set_user_casings(api.custom_casings)
         self.api = api
-        self.pkg = package(api.name)
+        self.pkg = api.python_package_name or package(api.name)
         self.brand = brand(api.name)
 
     def render(self) -> str:

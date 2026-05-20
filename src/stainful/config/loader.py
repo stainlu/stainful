@@ -41,7 +41,7 @@ from stainful.errors import ConfigError, SourceLoc
 _KNOWN_TOP = {
     "edition", "organization", "resources", "targets", "settings",
     "client_settings", "environments", "pagination", "security",
-    "security_schemes", "streaming",
+    "security_schemes", "streaming", "custom_casings",
 }
 # Valid Stainless top-level keys we don't act on yet. These are PRESERVED
 # silently — a real `stainless.yml` legitimately has them; warning on them
@@ -49,10 +49,41 @@ _KNOWN_TOP = {
 # unrecognized keys (typos / unknown) get a soft warning — that's the signal
 # worth keeping.
 _KNOWN_DEFERRED = {
-    "query_settings", "multipart_settings", "readme", "custom_casings",
+    "query_settings", "multipart_settings", "readme",
     "constants", "diagnostics", "unspecified_endpoints", "codeflow",
     "openapi", "$schema",
 }
+
+
+def _parse_custom_casings(node: object) -> dict[str, str]:
+    """Normalize `custom_casings:` into a `{snake: PascalCase}` dict.
+
+    Stainless allows two surface forms, both common in real configs:
+
+        custom_casings:
+          openai_id_string: OpenAIIDString
+          inputs_options: InputsOptions
+
+    or
+
+        custom_casings:
+          - openai_id_string: OpenAIIDString
+          - inputs_options: InputsOptions
+
+    Empty / unsupported values are ignored — the heuristics fall back.
+    """
+    out: dict[str, str] = {}
+    if isinstance(node, dict):
+        for k, v in node.items():
+            if isinstance(k, str) and isinstance(v, str):
+                out[k] = v
+    elif isinstance(node, list):
+        for entry in node:
+            if isinstance(entry, dict) and len(entry) == 1:
+                k, v = next(iter(entry.items()))
+                if isinstance(k, str) and isinstance(v, str):
+                    out[k] = v
+    return out
 _KNOWN_METHOD = {
     "endpoint", "paginated", "unwrap_response", "type", "positional_params",
     "body_param_name", "skip_test_reason", "streaming",
@@ -219,6 +250,7 @@ class _Loader:
         cfg.security = list(data.get("security", []) or [])
         cfg.security_schemes = dict(data.get("security_schemes", {}) or {})
         cfg.streaming = dict(data.get("streaming", {}) or {})
+        cfg.custom_casings = _parse_custom_casings(data.get("custom_casings"))
 
         cs_node = data.get("client_settings") or {}
         opts = {}

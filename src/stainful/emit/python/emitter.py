@@ -22,6 +22,7 @@ from stainful.emit.python._casing import (
     pascal,
     pascal_singular_last,
     package,
+    set_user_casings,
     singularize,
     snake,
 )
@@ -250,8 +251,17 @@ def _rcls(name: str) -> str:
 
 class _Emitter:
     def __init__(self, api: API, out_dir: str) -> None:
+        # Install user-declared name overrides BEFORE any casing call so
+        # brand()/pascal() see them. Module-level state (single-threaded
+        # emit), cleared by the next emit() call to a different API.
+        set_user_casings(api.custom_casings)
         self.api = api
-        self.pkg = package(api.name)
+        # `targets.python.package_name` overrides the heuristic — Stainless
+        # configs frequently set this when the API name doesn't transliterate
+        # to the desired import name (e.g. `name: acme-ai-sdk` but
+        # `package_name: acme`). Without honoring this, the user's
+        # `pip install acme` would fail.
+        self.pkg = api.python_package_name or package(api.name)
         self.brand = brand(api.name)
         self.out = Path(out_dir)
         self.root = self.out / self.pkg

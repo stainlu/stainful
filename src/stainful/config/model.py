@@ -128,6 +128,13 @@ class Config:
     security: list = field(default_factory=list)
     security_schemes: dict = field(default_factory=dict)
     streaming: dict = field(default_factory=dict)
+    # User-declared name overrides — snake-cased input -> PascalCase output.
+    # Stainless calls this `custom_casings`. Used to spell out compound
+    # names where the heuristics can't infer the right casing
+    # (`openai_id_string` -> `OpenAIIDString`, etc.). Accepts either the
+    # dict form `{snake: Pascal}` or the list-of-singletons form
+    # `[{snake: Pascal}, ...]`; the loader normalizes both.
+    custom_casings: dict[str, str] = field(default_factory=dict)
     # Unrecognized top-level keys (readme, query_settings, codeflow, …) preserved
     # so a real config round-trips and the IR builder can opt in later.
     extra: dict = field(default_factory=dict)

@@ -126,5 +126,12 @@ class API:
     # once as shared classes named after the key, e.g. Reference -> "references"
     # -> class `References`). Everything else is operation-local.
     shared_models: dict[str, str] = field(default_factory=dict)
+    # User-declared name overrides from `custom_casings:` in stainless.yml.
+    # `{snake: PascalCase}`. Used by the emitter's casing helpers to spell
+    # out compound names the heuristics can't infer.
+    custom_casings: dict[str, str] = field(default_factory=dict)
+    # `targets.python.package_name` from stainless.yml — when set, overrides
+    # the package directory name (otherwise derived from `organization.name`).
+    python_package_name: str | None = None
     # config `$client:` methods live on root (no parent resource).
     root: Resource = field(default_factory=lambda: Resource(name="$client"))

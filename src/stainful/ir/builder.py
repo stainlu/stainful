@@ -53,6 +53,12 @@ from stainful.openapi.resolver import flatten_allof, resolve_ref
 
 _SCHEMA_PREFIX = "#/components/schemas/"
 
+
+def _strip_ref(s: str) -> str:
+    """Both `Reference` and `#/components/schemas/Reference` are valid
+    shared-model values in real configs — normalize to the bare name."""
+    return s[len(_SCHEMA_PREFIX):] if s.startswith(_SCHEMA_PREFIX) else s
+
 # OpenAPI (type, format) -> IR primitive.
 _STRING_FORMATS = {
     "date": PrimitiveKind.DATE,
@@ -440,10 +446,21 @@ class _Builder:
             auth=self._auth(),
             models=self._models(),
             shared_models={
-                mc.openapi_ref: key
+                # Normalize: configs use either the bare component name
+                # (`references: Reference`) or the full $ref string
+                # (`acme_widget_id_string: "#/components/schemas/..."`) —
+                # both are valid Stainless surface and produce the same
+                # shape downstream.
+                _strip_ref(mc.openapi_ref): key
                 for key, mc in self.config.shared_models.items()
                 if mc.openapi_ref
             },
+            custom_casings=dict(self.config.custom_casings),
+            python_package_name=(
+                self.config.targets.get("python").package_name
+                if self.config.targets.get("python") is not None
+                else None
+            ),
             root=root,
         )
 

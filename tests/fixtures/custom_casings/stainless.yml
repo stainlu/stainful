@@ -1,0 +1,32 @@
+organization:
+  name: acme-ai-sdk
+
+# Two custom_casings entries exercising both:
+#   - whole-name brand override:  `acme-ai-sdk` -> `AcmeAISDK` (vs heuristic
+#     `AcmeAiSDK`, which is wrong)
+#   - per-name override for a type:  `acme_widget_id_string` ->
+#     `AcmeWidgetIDString` (vs heuristic `AcmeWidgetIdString`, where `id`
+#     would catch the initialism but `idstring` is one token without a hint).
+custom_casings:
+  acme_ai_sdk: AcmeAISDK
+  acme_widget_id_string: AcmeWidgetIDString
+
+resources:
+  $shared:
+    # Promote the response schema to a shared (named) class so the
+    # custom-casing override has a visible target. Without this, Stainless's
+    # path-named inlining would name it WidgetsRetrieveResponse and the
+    # component name never appears in the SDK.
+    models:
+      acme_widget_id_string: "#/components/schemas/AcmeWidgetIdString"
+  widgets:
+    methods:
+      retrieve:
+        endpoint: "get /widgets/{id}"
+
+targets:
+  python:
+    package_name: acme
+
+environments:
+  production: https://api.acme-ai.test

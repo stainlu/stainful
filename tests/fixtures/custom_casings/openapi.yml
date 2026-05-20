@@ -1,0 +1,30 @@
+openapi: 3.0.0
+info:
+  title: Acme-AI
+  version: 1.0.0
+servers:
+  - url: https://api.acme-ai.test
+paths:
+  /widgets/{id}:
+    get:
+      operationId: getWidget
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: a widget
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AcmeWidgetIdString" }
+components:
+  schemas:
+    AcmeWidgetIdString:
+      # Object schema — the response type becomes a named class so the
+      # custom_casings override has a visible target. (A bare-string
+      # $ref would inline as `str`; no class to rename.)
+      type: object
+      required: [id]
+      properties:
+        id: { type: string }
+        api_id: { type: string }
+      description: A widget (uses a custom-cased compound name).
