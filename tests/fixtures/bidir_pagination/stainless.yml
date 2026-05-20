@@ -1,0 +1,35 @@
+organization:
+  name: anth
+
+# Bi-directional pagination — anthropic's exact `SyncPage` shape:
+# request has both `before_id` AND `after_id`; response has `first_id`
+# AND `last_id`. The runtime picks direction from the initial request.
+# Stainless emits this as `client.<resource>.list(...)` returning
+# `SyncPage[Item]` (named via `pagination[].name: page`).
+
+resources:
+  things:
+    methods:
+      list:
+        endpoint: "get /things"
+        paginated: true
+
+pagination:
+  - name: page
+    type: cursor
+    request:
+      before_id: { type: string }
+      after_id:  { type: string }
+      limit:     { type: integer }
+    response:
+      data:     { type: array }
+      has_more: { type: boolean }
+      first_id: { type: string, nullable: true }
+      last_id:  { type: string, nullable: true }
+
+targets:
+  python:
+    package_name: anth
+
+environments:
+  production: https://api.anth.test

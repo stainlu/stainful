@@ -59,6 +59,16 @@ class PaginationIntent:
     # like `from openai.pagination import SyncNextCursorPage` resolve.
     # `None` → fall back to a generic name derived from `style`.
     name: str | None = None
+    # True for anthropic-style bi-directional pagination (request has
+    # both `before_*` and `after_*` params; response has `first_*` and
+    # `last_*` fields). The runtime picks direction from the initial
+    # request — see `_BiDirectionalPage`.
+    bidirectional: bool = False
+    # Bi-directional wire params/fields (only set when `bidirectional`):
+    bi_before_param: str | None = None     # `before_id`-style request param
+    bi_after_param: str | None = None      # `after_id`-style request param
+    bi_first_field: str | None = None      # `first_id`-style response field
+    bi_last_field: str | None = None       # `last_id`-style response field
     # request-side param names and response-side data/next paths.
     request_params: dict[str, str] = field(default_factory=dict)
     data_path: str = "data"

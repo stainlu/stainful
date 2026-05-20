@@ -30,6 +30,8 @@ __all__ = [
     "AsyncPage",
     "SyncCursorPage",
     "AsyncCursorPage",
+    "SyncBiDirectionalPage",
+    "AsyncBiDirectionalPage",
 ]
 
 
@@ -164,6 +166,61 @@ class SyncCursorPage(_CursorPage[_T], Generic[_T]):
 
 
 class AsyncCursorPage(_CursorPage[_T], Generic[_T]):
+    def __aiter__(self) -> AsyncIterator[_T]:
+        return _walk_async(self)
+
+
+class _BiDirectionalPage(BasePage[_T], Generic[_T]):
+    """Anthropic-shape pagination: pick `before_id`/`after_id` based on
+    which the *initial* request set. Forward direction is the default
+    (returns `after_id=<last_id>`); reverse if the user originally
+    passed `before_id`, the page emits `before_id=<first_id>` on the
+    next-page request.
+
+    Field/param names are configurable via `_pagination_cfg` for specs
+    that share the algorithm but use different names; defaults match
+    anthropic-sdk-python's `SyncPage`.
+    """
+
+    data: List[_T]
+    has_more: Optional[bool] = None
+    first_id: Optional[str] = None
+    last_id: Optional[str] = None
+
+    def _get_page_items(self) -> List[_T]:
+        return self.data or []
+
+    def next_page_info(self) -> Optional[PageInfo]:
+        if self.has_more is False or not self.data:
+            return None
+        cfg = self._pagination_cfg or {}
+        before_param = cfg.get("before_param") or "before_id"
+        after_param = cfg.get("after_param") or "after_id"
+        first_field = cfg.get("first_field") or "first_id"
+        last_field = cfg.get("last_field") or "last_id"
+        # Initial-request direction. `_options.params` is the dict of
+        # query params that originally went out — if it carried the
+        # `before_param`, the user is walking backwards.
+        params = (
+            getattr(self._options, "params", None) if self._options else None
+        ) or {}
+        if params.get(before_param):
+            first_id = getattr(self, first_field, None)
+            if not first_id:
+                return None
+            return PageInfo(params={before_param: first_id})
+        last_id = getattr(self, last_field, None)
+        if not last_id:
+            return None
+        return PageInfo(params={after_param: last_id})
+
+
+class SyncBiDirectionalPage(_BiDirectionalPage[_T], Generic[_T]):
+    def __iter__(self) -> Iterator[_T]:  # type: ignore[override]
+        return _walk_sync(self)
+
+
+class AsyncBiDirectionalPage(_BiDirectionalPage[_T], Generic[_T]):
     def __aiter__(self) -> AsyncIterator[_T]:
         return _walk_async(self)
 

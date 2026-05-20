@@ -295,6 +295,27 @@ class _Builder:
         cursor_response_field = next(
             (k for k in resp if k not in self._NON_CURSOR_RESPONSE_KEYS), None
         )
+        # Bi-directional detection (anthropic shape): `request:` has both
+        # a `before_*` and an `after_*` cursor param; `response:` has both
+        # a `first_*` and a `last_*` field. When matched, the runtime
+        # picks direction from the *initial* request.
+        before_param = next(
+            (k for k in req if k.startswith("before") and k not in self._SIZE_PARAMS),
+            None,
+        )
+        after_param = next(
+            (k for k in req if k.startswith("after") and k not in self._SIZE_PARAMS),
+            None,
+        )
+        first_field = next(
+            (k for k in resp if k.startswith("first")), None
+        )
+        last_field = next(
+            (k for k in resp if k.startswith("last")), None
+        )
+        bidirectional = bool(
+            before_param and after_param and first_field and last_field
+        )
         return PaginationIntent(
             style=PaginationStyle(p.type),
             name=p.name,
@@ -303,6 +324,11 @@ class _Builder:
             continue_on_empty_items=p.continue_on_empty_items,
             cursor_param=cursor_param,
             cursor_response_field=cursor_response_field,
+            bidirectional=bidirectional,
+            bi_before_param=before_param if bidirectional else None,
+            bi_after_param=after_param if bidirectional else None,
+            bi_first_field=first_field if bidirectional else None,
+            bi_last_field=last_field if bidirectional else None,
         )
 
     def _streaming(self, mc: MethodConfig) -> StreamingIntent | None:

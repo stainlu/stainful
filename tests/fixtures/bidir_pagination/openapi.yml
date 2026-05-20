@@ -1,0 +1,37 @@
+openapi: 3.0.0
+info:
+  title: Anth
+  version: 1.0.0
+servers:
+  - url: https://api.anth.test
+paths:
+  /things:
+    get:
+      operationId: listThings
+      parameters:
+        - { name: before_id, in: query, schema: { type: string } }
+        - { name: after_id,  in: query, schema: { type: string } }
+        - { name: limit,     in: query, schema: { type: integer } }
+      responses:
+        "200":
+          description: page (anthropic-shape — first_id/last_id + has_more)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: "#/components/schemas/Thing" }
+                  has_more: { type: boolean }
+                  first_id: { type: string, nullable: true }
+                  last_id:  { type: string, nullable: true }
+components:
+  schemas:
+    Thing:
+      type: object
+      required: [id, name]
+      properties:
+        id:   { type: string }
+        name: { type: string }
