@@ -5,6 +5,18 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.2.0] — 2026-05-20
+
+**Seven product-quality fixes verified vs the real Stainless SDKs (openai-
+python / anthropic-sdk-python / onebusaway-python-sdk) — each its own
+CI-gated commit.** Quality bar: resource-method recall 1.00,
+method-signature match 1.00, model-name recall 0.95, generated SDK
+mypy-clean, 29/29 of Stainless's own OneBusAway test files import
+unchanged, end-to-end behavioral conformance for streaming + cursor
+pagination + multipart + binary download + binary upload + webhook
+unwrap. Drop-in for `stainless.yml`; not affiliated with Stainless or
+Anthropic.
+
 ### Added
 - **Webhook unwrap with typed discriminated event union (Standard Webhooks
   scheme).** A `stainless.yml` method with `type: webhook_unwrap` now
