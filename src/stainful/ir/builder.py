@@ -267,15 +267,35 @@ class _Builder:
         return out
 
     # --- methods / resources ----------------------------------------------
+    # Request keys that carry page *size*, not the cursor itself — used to
+    # pick the cursor param out of the `request:` block.
+    _SIZE_PARAMS = frozenset({
+        "limit", "per_page", "page_size", "max_results", "max_items",
+    })
+    # Response keys that aren't cursor carriers.
+    _NON_CURSOR_RESPONSE_KEYS = frozenset({
+        "data", "items", "results", "has_more", "object", "total",
+    })
+
     def _pagination(self, mc: MethodConfig) -> PaginationIntent | None:
         if not mc.paginated or not self.config.pagination:
             return None
         p = self.config.pagination[0]
+        req = p.request or {}
+        resp = p.response or {"data": None}
+        cursor_param = next(
+            (k for k in req if k not in self._SIZE_PARAMS), None
+        )
+        cursor_response_field = next(
+            (k for k in resp if k not in self._NON_CURSOR_RESPONSE_KEYS), None
+        )
         return PaginationIntent(
             style=PaginationStyle(p.type),
-            request_params={k: k for k in (p.request or {})},
-            data_path=next(iter(p.response or {"data": None}), "data"),
+            request_params={k: k for k in req},
+            data_path=next(iter(resp), "data"),
             continue_on_empty_items=p.continue_on_empty_items,
+            cursor_param=cursor_param,
+            cursor_response_field=cursor_response_field,
         )
 
     def _streaming(self, mc: MethodConfig) -> StreamingIntent | None:

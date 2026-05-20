@@ -224,15 +224,19 @@ class SyncAPIClient(_BaseClient):
         return self._request("PATCH", path, options=options, cast_to=cast_to,
                              json_body=body)
 
-    def _get_api_list(self, path: str, *, page: type, options: RequestOptions) -> Any:
+    def _get_api_list(
+        self, path: str, *, page: type, options: RequestOptions,
+        pagination_cfg: dict | None = None,
+    ) -> Any:
         result = self._request("GET", path, options=options, cast_to=page)
-        return result._init_pagination(self, path, page, options)
+        return result._init_pagination(self, path, page, options, pagination_cfg)
 
-    def _paginate_next(self, path, page, options, info):
+    def _paginate_next(self, path, page, options, info, pagination_cfg=None):
         from .pagination import merge_options
 
         return self._get_api_list(
-            path, page=page, options=merge_options(options, info)
+            path, page=page, options=merge_options(options, info),
+            pagination_cfg=pagination_cfg,
         )
 
 
@@ -312,14 +316,17 @@ class AsyncAPIClient(_BaseClient):
         return await self._request("PATCH", path, options=options, cast_to=cast_to,
                                    json_body=body)
 
-    async def _get_api_list(self, path: str, *, page: type,
-                            options: RequestOptions) -> Any:
+    async def _get_api_list(
+        self, path: str, *, page: type, options: RequestOptions,
+        pagination_cfg: dict | None = None,
+    ) -> Any:
         result = await self._request("GET", path, options=options, cast_to=page)
-        return result._init_pagination(self, path, page, options)
+        return result._init_pagination(self, path, page, options, pagination_cfg)
 
-    async def _paginate_next(self, path, page, options, info):
+    async def _paginate_next(self, path, page, options, info, pagination_cfg=None):
         from .pagination import merge_options
 
         return await self._get_api_list(
-            path, page=page, options=merge_options(options, info)
+            path, page=page, options=merge_options(options, info),
+            pagination_cfg=pagination_cfg,
         )

@@ -47,12 +47,19 @@ class BasePage(BaseModel, Generic[_T]):
     _path: str = PrivateAttr(default="")
     _page_cls: Any = PrivateAttr(default=None)
     _options: Any = PrivateAttr(default=None)
+    # Per-call pagination config from the generator
+    # (e.g. `{"cursor_param": "after", "cursor_response_field": "last_id"}`).
+    # `None` → runtime defaults — see `_CursorPage.next_page_info`.
+    _pagination_cfg: Optional[dict] = PrivateAttr(default=None)
 
-    def _init_pagination(self, client, path, page_cls, options) -> "BasePage":
+    def _init_pagination(
+        self, client, path, page_cls, options, pagination_cfg=None
+    ) -> "BasePage":
         self._client = client
         self._path = path
         self._page_cls = page_cls
         self._options = options
+        self._pagination_cfg = pagination_cfg
         return self
 
     def _get_page_items(self) -> List[_T]:  # pragma: no cover - overridden
@@ -72,7 +79,8 @@ def _walk_sync(page: "BasePage") -> Iterator[Any]:
         if info is None or page._client is None:
             return
         page = page._client._paginate_next(
-            page._path, page._page_cls, page._options, info
+            page._path, page._page_cls, page._options, info,
+            pagination_cfg=page._pagination_cfg,
         )
 
 
@@ -84,7 +92,8 @@ async def _walk_async(page: "BasePage") -> AsyncIterator[Any]:
         if info is None or page._client is None:
             return
         page = await page._client._paginate_next(
-            page._path, page._page_cls, page._options, info
+            page._path, page._page_cls, page._options, info,
+            pagination_cfg=page._pagination_cfg,
         )
 
 
@@ -130,12 +139,22 @@ class _CursorPage(BasePage[_T], Generic[_T]):
     def next_page_info(self) -> Optional[PageInfo]:
         if self.has_more is False or not self.data:
             return None
-        cursor = self.next_cursor
+        cfg = self._pagination_cfg or {}
+        # Wire param name: `after` matches openai/anthropic SyncCursorPage —
+        # use that as the safe default rather than the literal "cursor",
+        # which silently fails against any API expecting `after`.
+        param = cfg.get("cursor_param") or "after"
+        field = cfg.get("cursor_response_field")
+        cursor: Optional[str] = None
+        if field is not None:
+            cursor = getattr(self, field, None)  # extra="allow" → attrs available
+        if cursor is None:
+            cursor = self.next_cursor
         if cursor is None:
             cursor = getattr(self.data[-1], "id", None)
         if cursor is None:
             return None
-        return PageInfo(params={"cursor": cursor})
+        return PageInfo(params={param: cursor})
 
 
 class SyncCursorPage(_CursorPage[_T], Generic[_T]):

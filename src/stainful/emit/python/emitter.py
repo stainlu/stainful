@@ -624,6 +624,23 @@ class _Emitter:
         if pag:
             page_cls, item = pag
             ret_t = f"{page_cls}[{item}]"
+            # Pagination config: wire param name + cursor response field,
+            # both from stainless.yml. Emitted only when set so the runtime
+            # falls through to defaults (`after`, `next_cursor`, last-item id).
+            cfg_items: list[str] = []
+            if m.pagination and m.pagination.cursor_param:
+                cfg_items.append(
+                    f'"cursor_param": "{m.pagination.cursor_param}"'
+                )
+            if m.pagination and m.pagination.cursor_response_field:
+                cfg_items.append(
+                    f'"cursor_response_field": '
+                    f'"{m.pagination.cursor_response_field}"'
+                )
+            cfg_kwarg = (
+                f"\n            pagination_cfg={{{', '.join(cfg_items)}}},"
+                if cfg_items else ""
+            )
             list_call = (
                 f"{await_}self._get_api_list(\n"
                 f'            f"{path}",\n'
@@ -633,7 +650,7 @@ class _Emitter:
                 f"                extra_query=extra_query,\n"
                 f"                extra_body=extra_body,\n"
                 f"                timeout=timeout,{params_kwarg}\n"
-                f"            ),\n"
+                f"            ),{cfg_kwarg}\n"
                 f"        )"
             )
             return (

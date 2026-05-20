@@ -1,0 +1,31 @@
+organization:
+  name: paginated-after-sdk
+
+# Models the openai/anthropic SyncCursorPage shape: cursor lives in the
+# `after=` query param, next cursor source on the response is `last_id`.
+# Proves stainful's pagination param is config-driven (not hard-coded).
+
+resources:
+  things:
+    methods:
+      list:
+        endpoint: get /things
+        paginated: true
+
+pagination:
+  - name: after_cursor
+    type: cursor
+    request:
+      after: { type: string }
+      limit: { type: integer }
+    response:
+      data: { type: array }
+      has_more: { type: boolean }
+      last_id: { type: string, nullable: true }
+
+targets:
+  python:
+    package_name: paginated_after
+
+environments:
+  production: https://api.paginated-after.test

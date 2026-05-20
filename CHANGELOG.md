@@ -20,6 +20,25 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
   conformance fixture + sync/async behavioral test. Generated SDK stays
   mypy-clean.
 
+### Fixed
+- **Cursor pagination wire param is now config-driven.** Previously the
+  runtime hard-coded `?cursor=<id>` on next-page requests — silently broken
+  against any real openai-/anthropic-style API expecting `?after=<last_id>`
+  (the actual Stainless `SyncCursorPage` shape). Now the IR derives the
+  cursor param name and the response cursor field from the stainless config
+  `request:` / `response:` blocks; the emitter passes them through; the
+  runtime uses them with safe defaults (`after`, then `next_cursor`, then
+  last-item `id`). One generic `_CursorPage` now covers the five forward-
+  only cursor variants in the openai+anthropic oracles (`SyncCursorPage`,
+  `SyncConversationCursorPage`, `SyncNextCursorPage`, `SyncTokenPage`,
+  `SyncPageCursor`) — same algorithm, different wire names. New fixture
+  (`tests/fixtures/paginated_after/`) + conformance test asserting the
+  wire request actually says `?after=2` from a `last_id` response;
+  original `cursor` fixture still passes. **Known scope boundary:**
+  anthropic's bi-directional `SyncPage` (chooses `before_id` vs `after_id`
+  from the initial request) is still forward-only here — separate algorithm,
+  separate work.
+
 ### Improved (model fidelity vs the real Stainless SDK)
 - Resource→type-name prefix now singularizes the last word
   (`trip-details` → `TripDetailRetrieveResponse`; `client.chat.completions`

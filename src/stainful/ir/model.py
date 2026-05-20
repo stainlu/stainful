@@ -58,6 +58,16 @@ class PaginationIntent:
     data_path: str = "data"
     next_path: str | None = None
     continue_on_empty_items: bool = False
+    # Wire param name carrying the cursor on next-page requests (e.g. `after`,
+    # `cursor`, `page_token`). Derived from config `request:` keys (the first
+    # non-size key). `None` → runtime default ("after", matching openai/
+    # anthropic convention). RESEARCH §4 #1 — was hard-coded to "cursor",
+    # silently broken against any API expecting "after".
+    cursor_param: str | None = None
+    # Response field holding the next cursor (e.g. `next_cursor`, `last_id`,
+    # `next`, `next_page`). Derived from config `response:` keys. `None` →
+    # runtime falls back to `next_cursor`, then last-item `.id`.
+    cursor_response_field: str | None = None
 
 
 @dataclass(frozen=True)

@@ -1,0 +1,41 @@
+openapi: 3.0.0
+info:
+  title: PaginatedAfter
+  version: 1.0.0
+servers:
+  - url: https://api.paginated-after.test
+paths:
+  /things:
+    get:
+      operationId: listThings
+      parameters:
+        - name: after
+          in: query
+          required: false
+          schema: { type: string }
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer }
+      responses:
+        "200":
+          description: a page of things (openai-shaped — `after` + `last_id`)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, has_more]
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: "#/components/schemas/Thing" }
+                  has_more: { type: boolean }
+                  last_id: { type: string, nullable: true }
+components:
+  schemas:
+    Thing:
+      type: object
+      required: [id, name]
+      properties:
+        id: { type: string }
+        name: { type: string }
