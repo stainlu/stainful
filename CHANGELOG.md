@@ -6,6 +6,29 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Added
+- **Webhook unwrap with typed discriminated event union (Standard Webhooks
+  scheme).** A `stainless.yml` method with `type: webhook_unwrap` now
+  generates `client.webhooks.unwrap(payload, headers, *, secret,
+  tolerance=300)` returning the **typed event variant** (not just a parsed
+  dict) — pydantic-discriminated `Annotated[Union[…], PropertyInfo(
+  discriminator=…)]` built from the config `event_types:` block. Sibling
+  `client.webhooks.verify_signature(...)` for verify-without-parse.
+  Signature scheme = **Standard Webhooks** (standardwebhooks.com): HMAC-
+  SHA256 over `f"{webhook_id}.{timestamp}.{body}"`, base64, multi-`v1,<sig>`
+  header, `whsec_` base64-decoded secret, constant-time compare, ±tolerance
+  replay window. Algorithm verified against the openai-python oracle
+  (`resources/webhooks/webhooks.py`); the verification helper is vendored
+  once into `<pkg>/_core/_webhooks.py` (single source). New
+  `InvalidWebhookSignatureError` is exported from the package root for
+  drop-in `except` compatibility. Previously the emitter ignored
+  `type: webhook_unwrap` and would have generated a broken `self._post(
+  f"")` (latent: no fixture triggered it). IR change: `event_types` $refs
+  are now resolved into IR `ModelRef`s so the emitter can render the typed
+  union. New `tests/fixtures/webhooks/` + 10-case `tests/test_webhook_unwrap.py`
+  (typed variant discrimination, `whsec_`-decode, bad sig, stale timestamp,
+  missing header, root-symbol export). **Known scope boundary:** the
+  `secret=` kwarg is required (no client-level `webhook_secret`/env-var
+  fallback yet).
 - **Raw binary request bodies (`application/octet-stream` uploads).**
   S3-style `PUT object`, GitHub release-asset upload, and similar raw
   uploads now work end-to-end: the emitter generates `body: bytes`,

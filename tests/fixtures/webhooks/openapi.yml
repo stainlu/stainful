@@ -1,0 +1,23 @@
+openapi: 3.0.0
+info:
+  title: Hooks
+  version: 1.0.0
+servers:
+  - url: https://api.hooks.test
+paths: {}
+components:
+  schemas:
+    OrderCreatedEvent:
+      type: object
+      required: [type, id, order_id]
+      properties:
+        type: { type: string, enum: [order.created] }
+        id: { type: string }
+        order_id: { type: string }
+    OrderCancelledEvent:
+      type: object
+      required: [type, id, order_id]
+      properties:
+        type: { type: string, enum: [order.cancelled] }
+        id: { type: string }
+        order_id: { type: string }

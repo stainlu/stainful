@@ -318,11 +318,27 @@ class _Builder:
     def _method(self, mc: MethodConfig) -> Method:
         if mc.endpoint is None:
             # webhook_unwrap etc. — no HTTP op; carry config through emit_hints.
+            hints: dict = {"type": mc.method_type, **mc.extra}
+            # For `type: webhook_unwrap`: resolve `event_types` $refs into
+            # ModelRefs so the emitter can render a typed discriminated union
+            # (matches openai-python's `UnwrapWebhookEvent`).
+            if mc.method_type == "webhook_unwrap":
+                raw = mc.extra.get("event_types") or {}
+                refs: dict[str, ModelRef] = {}
+                for name, schema in raw.items():
+                    ref = (schema or {}).get("$ref") if isinstance(schema, dict) else None
+                    if not isinstance(ref, str) or not ref.startswith("#/components/schemas/"):
+                        continue
+                    comp = ref.rsplit("/", 1)[-1]
+                    if comp in self.doc.schemas:
+                        refs[name] = ModelRef(comp)
+                hints["event_types"] = refs
+                hints["discriminator"] = mc.extra.get("discriminator") or "type"
             return Method(
                 name=mc.name,
                 http_verb=HTTPVerb.POST,
                 path="",
-                emit_hints={"type": mc.method_type, **mc.extra},
+                emit_hints=hints,
                 docs=None,
             )
         key = (mc.endpoint.verb, mc.endpoint.path)

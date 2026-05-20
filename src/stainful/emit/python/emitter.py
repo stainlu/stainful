@@ -477,7 +477,87 @@ class _Emitter:
         self._classes[name] = "\n".join(lines)
         self._class_module[name] = f"{snake(resource)}_{snake(m.name)}_params"
 
+    def _webhook_unwrap_src(self, m: Method, resource: str) -> str:
+        """Emit `unwrap()` + `verify_signature()` for a `type: webhook_unwrap`
+        config method. The typed event is a discriminated union built from
+        the config `event_types:` block (resolved into ModelRefs by the IR
+        builder); absent → return type is `object`.
+        """
+        event_types = m.emit_hints.get("event_types") or {}
+        disc = m.emit_hints.get("discriminator") or "type"
+
+        if event_types:
+            alias_name = f"{pascal_singular_last(resource)}{pascal(m.name)}Event"
+            alias_module = f"{snake(resource)}_{snake(m.name)}_event"
+            variants = sorted({
+                self._emit_named(ref.name)
+                for ref in event_types.values()
+                if isinstance(ref, ModelRef)
+            })
+            if variants:
+                # Annotated[Union[A, B, …], PropertyInfo(discriminator="type")]
+                # — matches openai-python's `UnwrapWebhookEvent` shape.
+                body = (
+                    f"{alias_name} = Annotated[\n"
+                    f"    Union[\n"
+                    + "".join(f"        {v},\n" for v in variants)
+                    + f"    ],\n"
+                    f'    PropertyInfo(discriminator="{disc}"),\n'
+                    f"]"
+                )
+                self._aliases[alias_name] = body
+                self._alias_module[alias_name] = alias_module
+                event_ann = alias_name
+            else:
+                event_ann = "object"
+        else:
+            event_ann = "object"
+
+        doc = (m.docs or "").strip().replace('"""', "'''") or (
+            "Verify the webhook signature (Standard Webhooks scheme) and "
+            "parse the payload into the typed event."
+        )
+        unwrap = (
+            f"    def {m.name}(\n"
+            f"        self,\n"
+            f"        payload: str | bytes,\n"
+            f"        headers: Mapping[str, str],\n"
+            f"        *,\n"
+            f"        secret: str,\n"
+            f"        tolerance: int = 300,\n"
+            f"    ) -> {event_ann}:\n"
+            f'        """{doc}"""\n'
+            f"        return cast({event_ann}, _webhook_unwrap_event(\n"
+            f"            payload, headers, secret=secret,\n"
+            f"            event_type={event_ann}, tolerance=tolerance,\n"
+            f"        ))"
+        )
+        verify = (
+            "    def verify_signature(\n"
+            "        self,\n"
+            "        payload: str | bytes,\n"
+            "        headers: Mapping[str, str],\n"
+            "        *,\n"
+            "        secret: str,\n"
+            "        tolerance: int = 300,\n"
+            "    ) -> None:\n"
+            '        """Verify the Standard-Webhooks signature; raise '
+            'InvalidWebhookSignatureError on failure."""\n'
+            "        _webhook_verify_signature(\n"
+            "            payload, headers, secret=secret, tolerance=tolerance,\n"
+            "        )"
+        )
+        return unwrap + "\n\n" + verify
+
     def _method_src(self, m: Method, resource: str, *, is_async: bool) -> str:
+        if m.emit_hints.get("type") == "webhook_unwrap":
+            # Standard-Webhooks unwrap: verify HMAC-SHA256 signature, parse
+            # JSON, validate into a typed event (discriminated union). No
+            # HTTP call — `verb`/path-args/body machinery below would emit
+            # garbage. openai-python's `client.webhooks.unwrap(...)` is the
+            # oracle. Method body is sync in BOTH the sync and async resource
+            # classes (the work is CPU-only — matches openai-python).
+            return self._webhook_unwrap_src(m, resource)
         ret = self._return_type(m, resource)
         path_args = [snake(p.name) for p in m.path_params]
         path = m.path
@@ -722,11 +802,21 @@ class _Emitter:
             "from ..types import " + ", ".join(used) + "\n" if used else ""
         )
         typing_needed = [
-            t for t in ("Literal", "overload") if re.search(rf"\b{t}\b", scan)
+            t for t in ("Literal", "Mapping", "cast", "overload")
+            if re.search(rf"\b{t}\b", scan)
         ]
         typing_import = (
             f"from typing import {', '.join(typing_needed)}\n"
             if typing_needed else ""
+        )
+        webhook_import = (
+            "from .._core._webhooks import (\n"
+            "    unwrap_event as _webhook_unwrap_event,\n"
+            "    verify_signature as _webhook_verify_signature,\n"
+            ")\n"
+            if "_webhook_unwrap_event(" in scan
+            or "_webhook_verify_signature(" in scan
+            else ""
         )
         stream_import = (
             "from .._core._streaming import AsyncStream, Stream\n"
@@ -747,8 +837,18 @@ class _Emitter:
         rn = snake(r.name)
 
         def wrapper(name: str, recv: str, fn: str) -> str:
+            # Webhook methods are sync in BOTH classes (matches openai-python:
+            # the work is CPU-only). The async raw/stream wrappers `await`
+            # their function — wrapping a sync method would TypeError at
+            # call time. openai-python itself doesn't expose
+            # `with_raw_response.unwrap`, so skip wrapping webhook methods.
+            wrapped_methods = [
+                m for m in r.methods
+                if m.emit_hints.get("type") != "webhook_unwrap"
+            ]
             body = "\n".join(
-                f"        self.{m.name} = {fn}({rn}.{m.name})" for m in r.methods
+                f"        self.{m.name} = {fn}({rn}.{m.name})"
+                for m in wrapped_methods
             ) or "        pass"  # resources with only subresources have no methods
             return (
                 f"class {name}:\n"
@@ -782,7 +882,7 @@ from .._core._response import (
 )
 from .._core._sentinels import NotGiven, not_given
 from .._core._types import Body, FileTypes, Headers, Query  # noqa: F401
-{stream_import}{jsonable_import}{pag_import}{sub_import}{models_import}
+{stream_import}{jsonable_import}{pag_import}{webhook_import}{sub_import}{models_import}
 __all__ = ["{cls}", "Async{cls}"]
 
 
@@ -908,7 +1008,8 @@ _DEFAULT_BASE_URL = "{env_url}"
             "APIConnectionError", "APIError", "APIResponseValidationError",
             "APIStatusError", "APITimeoutError", "AuthenticationError",
             "BadRequestError", "ConflictError", "InternalServerError",
-            "NotFoundError", "PermissionDeniedError", "RateLimitError",
+            "InvalidWebhookSignatureError", "NotFoundError",
+            "PermissionDeniedError", "RateLimitError",
             "UnprocessableEntityError",
         ]
         return (

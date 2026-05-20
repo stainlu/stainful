@@ -1,0 +1,27 @@
+organization:
+  name: hooks
+
+# `type: webhook_unwrap` — no HTTP endpoint. The emitter generates
+# `client.webhooks.unwrap(payload, headers, *, secret, tolerance=300)`
+# returning a typed discriminated union over `event_types`, plus a sibling
+# `verify_signature(...)`. Algorithm = Standard Webhooks
+# (standardwebhooks.com), oracle = openai-python's `client.webhooks.unwrap`.
+
+resources:
+  webhooks:
+    methods:
+      unwrap:
+        type: webhook_unwrap
+        event_types:
+          order.created:
+            $ref: "#/components/schemas/OrderCreatedEvent"
+          order.cancelled:
+            $ref: "#/components/schemas/OrderCancelledEvent"
+        discriminator: type
+
+targets:
+  python:
+    package_name: hooks
+
+environments:
+  production: https://api.hooks.test

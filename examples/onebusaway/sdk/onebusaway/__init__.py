@@ -14,6 +14,7 @@ from ._core._exceptions import (
     BadRequestError,
     ConflictError,
     InternalServerError,
+    InvalidWebhookSignatureError,
     NotFoundError,
     PermissionDeniedError,
     RateLimitError,
@@ -23,4 +24,4 @@ from ._core._sentinels import NOT_GIVEN, NotGiven, Omit, not_given, omit
 
 OnebusawaySDKError = APIError
 
-__all__ = ['OnebusawaySDK', 'AsyncOnebusawaySDK', 'OnebusawaySDKError', 'NotGiven', 'not_given', 'NOT_GIVEN', 'Omit', 'omit', 'APIConnectionError', 'APIError', 'APIResponseValidationError', 'APIStatusError', 'APITimeoutError', 'AuthenticationError', 'BadRequestError', 'ConflictError', 'InternalServerError', 'NotFoundError', 'PermissionDeniedError', 'RateLimitError', 'UnprocessableEntityError']
+__all__ = ['OnebusawaySDK', 'AsyncOnebusawaySDK', 'OnebusawaySDKError', 'NotGiven', 'not_given', 'NOT_GIVEN', 'Omit', 'omit', 'APIConnectionError', 'APIError', 'APIResponseValidationError', 'APIStatusError', 'APITimeoutError', 'AuthenticationError', 'BadRequestError', 'ConflictError', 'InternalServerError', 'InvalidWebhookSignatureError', 'NotFoundError', 'PermissionDeniedError', 'RateLimitError', 'UnprocessableEntityError']

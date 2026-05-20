@@ -25,7 +25,17 @@ __all__ = [
     "UnprocessableEntityError",
     "RateLimitError",
     "InternalServerError",
+    "InvalidWebhookSignatureError",
 ]
+
+
+class InvalidWebhookSignatureError(ValueError):
+    """Raised when a webhook payload's signature/timestamp can't be verified.
+
+    Standard Webhooks (standardwebhooks.com) scheme — symbol-identical to
+    openai-python's `InvalidWebhookSignatureError` so `except` clauses port
+    unchanged.
+    """
 
 
 class APIError(Exception):
