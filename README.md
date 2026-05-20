@@ -34,6 +34,7 @@ as-is.
 - 🧭 **Domain-shaped clients** — `client.chat.completions.create(...)`, not flat stubs
 - ⚡ **Sync + async** generated from one model
 - 📦 **Self-contained output** — the generated SDK depends only on `httpx` + `pydantic`
+- 📑 **`stainful docs`** — emit a Stainless-style `api.md` from the same inputs (per-resource sections, Methods lists with verb+path, Mintlify-compatible)
 
 ## Quickstart
 
@@ -42,6 +43,9 @@ pip install stainful
 
 # generate an idiomatic Python SDK from your OpenAPI spec + stainless.yml
 stainful generate --spec openapi.yml --config stainless.yml --out ./sdk
+
+# OR emit a Stainless-style api.md doc from the same inputs
+stainful docs --spec openapi.yml --config stainless.yml --out ./api.md
 ```
 
 The generated SDK feels like an official client:
