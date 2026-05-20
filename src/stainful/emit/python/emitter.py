@@ -288,6 +288,11 @@ class _Emitter:
         # collected output, insertion-ordered: class name -> source
         self._classes: dict[str, str] = {}
         self._aliases: dict[str, str] = {}
+        # Distinct page-class display names referenced by paginated methods
+        # (e.g. {"CursorPage", "NextCursorPage"}). The emitter appends
+        # `Sync<name> = SyncCursorPage` aliases to the vendored runtime's
+        # pagination.py so the names are importable.
+        self._page_aliases: set[str] = set()
         self._building: set[str] = set()
         # per-file types/ layout: which module each class/alias belongs to.
         # `_cur_module` is the render-context (single synchronous pass).
@@ -530,13 +535,30 @@ class _Emitter:
         """(PageClass, ItemAnnotation) for a paginated method, else None.
 
         Stainless returns `Sync/AsyncCursorPage[Item]` (RESEARCH §4 #1) — an
-        object you iterate to transparently walk every page.
+        object you iterate to transparently walk every page. Class name
+        derives from `pagination[].name` in stainless.yml (e.g.
+        `next_cursor_page` → `SyncNextCursorPage`/`AsyncNextCursorPage`)
+        so user imports of specific Stainless page-class names resolve.
+        All such names are aliased to the same underlying `_CursorPage`
+        algorithm — config drives the wire param / response field.
         """
         if not m.pagination:
             return None
         style = getattr(m.pagination.style, "value", m.pagination.style)
-        kind = "CursorPage" if style in ("cursor", "cursor_id") else "Page"
+        if m.pagination.name:
+            # Strip the trailing "_page" snake-suffix so `cursor_page` →
+            # `CursorPage` (not `CursorPagePage`).
+            stem = m.pagination.name
+            if stem.lower().endswith("_page"):
+                stem = stem[:-5]
+            kind = f"{pascal(stem)}Page"
+        else:
+            kind = "CursorPage" if style in ("cursor", "cursor_id") else "Page"
         cls = f"{'Async' if is_async else 'Sync'}{kind}"
+        # Track distinct page-class names so we can emit alias lines into
+        # the vendored runtime's pagination module (all forward-only
+        # cursor variants share `_CursorPage`'s algorithm).
+        self._page_aliases.add(kind)
         # item type = element of the response's data array
         resp = m.responses.get("200") or next(iter(m.responses.values()), None)
         obj = self._resolve_object(resp) if resp is not None else None
@@ -992,9 +1014,13 @@ class _Emitter:
             f"from {self.pkg}._core._models import to_jsonable\n"
             if "to_jsonable(" in scan else ""
         )
+        # Match any `Sync<...>Page` / `Async<...>Page` symbol — covers the
+        # runtime's built-in `SyncCursorPage` / `SyncPage` and the spec-
+        # specific aliases the emitter appends to `_core/pagination.py`
+        # (`SyncTokenPage`, `SyncNextCursorPage`, `SyncAfterCursorPage`, …).
         pages = sorted({
             m.group(0)
-            for m in re.finditer(r"\b(?:Sync|Async)(?:Cursor)?Page\b", scan)
+            for m in re.finditer(r"\b(?:Sync|Async)[A-Z][A-Za-z]*Page\b", scan)
         })
         pag_import = (
             f"from {self.pkg}._core.pagination import {', '.join(pages)}\n"
@@ -1275,6 +1301,26 @@ _DEFAULT_BASE_URL = "{env_url}"
         # 3. client + package init + _utils (Stainless exposes a top-level
         #    `<pkg>._utils` with these date helpers; real consumer code and
         #    test suites import them — part of the drop-in surface) + pyproject
+        # Page-class aliases: any spec-specific page class names users
+        # might import (`SyncNextCursorPage`, `SyncTokenPage`, …) get
+        # alias lines appended to the vendored `_core/pagination.py` so
+        # imports resolve. Each alias points to `SyncCursorPage` /
+        # `AsyncCursorPage` — the algorithm is one config-driven
+        # implementation. Skipped for the runtime default
+        # (`CursorPage` already exists).
+        extra_aliases = sorted(
+            kind for kind in self._page_aliases if kind != "CursorPage"
+        )
+        if extra_aliases:
+            pag_path = self.root / "_core" / "pagination.py"
+            block = ["", "", "# Stainful: spec-specific page-class aliases."]
+            for kind in extra_aliases:
+                if kind == "Page":
+                    continue  # `SyncPage`/`AsyncPage` already in the runtime
+                block.append(f"Sync{kind} = SyncCursorPage")
+                block.append(f"Async{kind} = AsyncCursorPage")
+            pag_path.write_text(pag_path.read_text() + "\n".join(block) + "\n")
+
         (self.root / "_client.py").write_text(self._client_src())
         (self.root / "_utils.py").write_text(_HEADER + _UTILS_SRC)
         (self.root / "__init__.py").write_text(self._pkg_init_src())

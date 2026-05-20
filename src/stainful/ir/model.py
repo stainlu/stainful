@@ -53,6 +53,12 @@ class SecurityScheme:
 @dataclass(frozen=True)
 class PaginationIntent:
     style: PaginationStyle
+    # `pagination[].name` from stainless.yml (e.g. `cursor_page`,
+    # `next_cursor_page`, `token_page`). Drives the emitted page class
+    # name (`Sync<Pascal>Page` / `Async<Pascal>Page`) so user imports
+    # like `from openai.pagination import SyncNextCursorPage` resolve.
+    # `None` → fall back to a generic name derived from `style`.
+    name: str | None = None
     # request-side param names and response-side data/next paths.
     request_params: dict[str, str] = field(default_factory=dict)
     data_path: str = "data"

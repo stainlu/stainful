@@ -297,6 +297,7 @@ class _Builder:
         )
         return PaginationIntent(
             style=PaginationStyle(p.type),
+            name=p.name,
             request_params={k: k for k in req},
             data_path=next(iter(resp), "data"),
             continue_on_empty_items=p.continue_on_empty_items,
