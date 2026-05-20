@@ -38,3 +38,25 @@ class BaseModel(pydantic.BaseModel):
 
     # Set by the client after construction; not a wire field.
     _request_id: Optional[str] = pydantic.PrivateAttr(default=None)
+
+    # --- Stainless drop-in helpers ----------------------------------------
+    # `.to_dict()` / `.to_json()` are the symbols Stainless customers reach
+    # for; we route them to pydantic v2's `model_dump` / `model_dump_json`
+    # with `by_alias=True` (Stainless's default: emit the wire name). Users
+    # who want python-name keys can still call `model_dump()` directly.
+
+    def to_dict(self, **kwargs: object) -> dict:
+        """Serialize to a dict with wire field names. Drop-in alias for
+        `pydantic.BaseModel.model_dump(by_alias=True, exclude_unset=True)`
+        — matches the Stainless surface; extra kwargs flow to pydantic."""
+        kwargs.setdefault("by_alias", True)
+        kwargs.setdefault("exclude_unset", True)
+        return self.model_dump(**kwargs)              # type: ignore[arg-type]
+
+    def to_json(self, **kwargs: object) -> str:
+        """Serialize to a JSON string with wire field names. Drop-in alias
+        for `pydantic.BaseModel.model_dump_json(by_alias=True,
+        exclude_unset=True)`."""
+        kwargs.setdefault("by_alias", True)
+        kwargs.setdefault("exclude_unset", True)
+        return self.model_dump_json(**kwargs)         # type: ignore[arg-type]

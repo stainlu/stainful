@@ -649,16 +649,32 @@ class _Emitter:
             "Verify the webhook signature (Standard Webhooks scheme) and "
             "parse the payload into the typed event."
         )
+        # Env-var fallback name: `<BRAND_UPPER>_WEBHOOK_SECRET` (matches
+        # openai-python's `OPENAI_WEBHOOK_SECRET` convention).
+        env_var = f"{self.api.name.upper().replace('-', '_').replace(' ', '_')}_WEBHOOK_SECRET"
+        # Strip non-alnum/underscore for safety (some brand names have dots etc.)
+        env_var = "".join(c if c.isalnum() or c == "_" else "_" for c in env_var)
+        secret_resolve = (
+            "        if secret is None:\n"
+            "            import os as _os\n"
+            f'            secret = _os.environ.get("{env_var}")\n'
+            "        if secret is None:\n"
+            "            raise ValueError(\n"
+            f'                "Webhook secret required: pass `secret=` or set '
+            f'{env_var} env var."\n'
+            "            )\n"
+        )
         unwrap = (
             f"    def {m.name}(\n"
             f"        self,\n"
             f"        payload: str | bytes,\n"
             f"        headers: Mapping[str, str],\n"
             f"        *,\n"
-            f"        secret: str,\n"
+            f"        secret: str | None = None,\n"
             f"        tolerance: int = 300,\n"
             f"    ) -> {event_ann}:\n"
             f'        """{doc}"""\n'
+            f"{secret_resolve}"
             f"        return cast({event_ann}, _webhook_unwrap_event(\n"
             f"            payload, headers, secret=secret,\n"
             f"            event_type={event_ann}, tolerance=tolerance,\n"
@@ -670,11 +686,12 @@ class _Emitter:
             "        payload: str | bytes,\n"
             "        headers: Mapping[str, str],\n"
             "        *,\n"
-            "        secret: str,\n"
+            "        secret: str | None = None,\n"
             "        tolerance: int = 300,\n"
             "    ) -> None:\n"
             '        """Verify the Standard-Webhooks signature; raise '
             'InvalidWebhookSignatureError on failure."""\n'
+            f"{secret_resolve}"
             "        _webhook_verify_signature(\n"
             "            payload, headers, secret=secret, tolerance=tolerance,\n"
             "        )"
