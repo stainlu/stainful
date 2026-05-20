@@ -128,8 +128,15 @@ def test_missing_api_key_is_loud(golden_onebusaway, monkeypatch):
 
 
 def test_with_raw_response_symbol_is_callable(golden_onebusaway):
+    """`with_raw_response.<method>` returns the rich `APIResponse[T]` (was
+    a pass-through pre-v0.4). Verify the symbol surface AND the wrapper
+    shape — status/headers reachable, `.parse()` returns the typed model
+    the SDK already validated (`.code` is a field on the model, distinct
+    from the wrapper's `.status_code`)."""
     client = _client(
         golden_onebusaway, lambda r: httpx.Response(200, json=_AGENCY_BODY)
     )
     assert callable(client.agency.with_raw_response.retrieve)
-    assert client.agency.with_raw_response.retrieve("1").code == 200
+    wrapped = client.agency.with_raw_response.retrieve("1")
+    assert wrapped.status_code == 200
+    assert wrapped.parse().code == 200

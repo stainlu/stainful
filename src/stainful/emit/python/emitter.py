@@ -1169,12 +1169,16 @@ _DEFAULT_BASE_URL = "{env_url}"
             + "from ._core._exceptions import (\n"
             + "".join(f"    {e},\n" for e in errs)
             + ")\n"
+            + "from ._core._response import APIResponse\n"
             + "from ._core._sentinels import NOT_GIVEN, NotGiven, Omit, not_given, omit\n\n"
             # Stainless names the catch-all root `<Brand>Error` and roots the
             # hierarchy on it. APIError is our root; alias it so the Stainless
             # symbol `except <pkg>.<Brand>Error:` keeps working (drop-in).
-            + f"{self.brand}Error = APIError\n\n"
-            + f"__all__ = {['%s' % self.brand, 'Async%s' % self.brand, '%sError' % self.brand, 'NotGiven', 'not_given', 'NOT_GIVEN', 'Omit', 'omit', *errs]!r}\n"
+            + f"{self.brand}Error = APIError\n"
+            # Drop-in alias: `from <pkg> import <Brand>APIResponse` resolves
+            # to the same generic class (openai-python convention).
+            + f"{self.brand}APIResponse = APIResponse\n\n"
+            + f"__all__ = {['%s' % self.brand, 'Async%s' % self.brand, '%sError' % self.brand, '%sAPIResponse' % self.brand, 'APIResponse', 'NotGiven', 'not_given', 'NOT_GIVEN', 'Omit', 'omit', *errs]!r}\n"
         )
 
     def _generated_pyproject(self) -> str:

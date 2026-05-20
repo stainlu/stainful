@@ -31,6 +31,7 @@ from ._models import BaseModel, to_jsonable
 from ._request_options import RequestOptions, make_request_options
 from ._resource import AsyncAPIResource, SyncAPIResource
 from ._response import (
+    APIResponse,
     async_to_raw_response_wrapper,
     async_to_streamed_response_wrapper,
     to_raw_response_wrapper,
@@ -86,6 +87,7 @@ __all__ = [
     "RateLimitError",
     "InternalServerError",
     "InvalidWebhookSignatureError",
+    "APIResponse",
     "to_raw_response_wrapper",
     "async_to_raw_response_wrapper",
     "to_streamed_response_wrapper",

@@ -135,10 +135,14 @@ class _BaseClient:
     def _process_response_data(
         self, *, data: Any, cast_to: Any, response: httpx.Response
     ) -> Any:
+        from ._response import APIResponse, _RAW_RESPONSE_CTX
+
+        wrap_raw = _RAW_RESPONSE_CTX.get()
         if cast_to is None:
-            return data
+            return APIResponse(http_response=response, parsed=data) if wrap_raw else data
         if cast_to is bytes:                       # binary download endpoint
-            return response.content
+            content = response.content
+            return APIResponse(http_response=response, parsed=content) if wrap_raw else content
         import pydantic
 
         # TypeAdapter handles: plain BaseModel subclasses, parametrized
@@ -152,7 +156,7 @@ class _BaseClient:
         try:
             adapter: Any = pydantic.TypeAdapter(cast_to)
         except pydantic.PydanticSchemaGenerationError:
-            return data
+            return APIResponse(http_response=response, parsed=data) if wrap_raw else data
         try:
             model: Any = adapter.validate_python(data)
         except pydantic.ValidationError as exc:
@@ -165,6 +169,10 @@ class _BaseClient:
             )
         except (AttributeError, ValueError):
             pass
+        # `with_raw_response.*` is active — bundle the raw httpx.Response
+        # alongside the typed model so callers get headers/status/...
+        if wrap_raw:
+            return APIResponse(http_response=response, parsed=model)
         return model
 
 
