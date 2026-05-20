@@ -18,6 +18,11 @@ retries, auto-pagination, streaming, sync **and** async. It reuses the
 `stainless.yml` format, so if you already have one, you can point stainful at it
 as-is.
 
+> **Migrating from Stainless?** Anthropic acquired Stainless and is winding
+> down the hosted SDK generator. stainful is a drop-in continuation path —
+> see [`docs/migrating-from-stainless.md`](docs/migrating-from-stainless.md)
+> for the step-by-step (it should be a few minutes).
+
 ## Features
 
 - 🧬 **Typed everything** — pydantic v2 models, real discriminated unions from `oneOf`
@@ -38,21 +43,6 @@ pip install stainful
 # generate an idiomatic Python SDK from your OpenAPI spec + stainless.yml
 stainful generate --spec openapi.yml --config stainless.yml --out ./sdk
 ```
-
-Or from source (and to run the conformance harness):
-
-```bash
-git clone https://github.com/stainlu/stainful && cd stainful
-uv venv && uv pip install -e ".[dev,generated-runtime]"
-uv run stainful generate \
-  --spec   examples/onebusaway/openapi.yml \
-  --config examples/onebusaway/stainless.yml \
-  --out    examples/onebusaway/sdk
-```
-
-That config is a real production `stainless.yml`; `examples/onebusaway/sdk`
-is checked in and CI fails if regenerating changes a byte (the repo dogfoods
-itself — see [`examples/onebusaway/`](examples/onebusaway/)).
 
 The generated SDK feels like an official client:
 
@@ -128,21 +118,37 @@ people who want that workflow without a hosted service.
 | `src/stainful/ir/`      | the intermediate representation |
 | `src/stainful/emit/`    | the Python emitter |
 | `src/stainful/runtime/` | the hand-written runtime vendored into generated SDKs |
-| `tests/fixtures/`       | conformance fixtures (OneBusAway, chat) |
+| `tests/fixtures/`       | conformance fixtures (chat / paginated / multipart / binary / webhooks / …) |
+| `examples/onebusaway/`  | committed dogfood — regenerated SDK is bit-stable; CI guards it |
+| `examples/openai/`      | real-world test: the public openai-openapi spec → mypy-clean SDK |
+| `docs/`                 | migration guide and other docs |
 
 ## Status
 
-Early but working. stainful generates complete sync + async SDKs and its output
-has been checked against the real Stainless-generated OneBusAway SDK — client
-class, package, env var, and call shape all match, so existing import lines keep
-working.
+**v0.2.0 on PyPI.** Generates complete sync + async SDKs, verified against
+the real Stainless-generated SDKs at pinned SHAs in CI:
 
-Not yet at full parity: `.to_json()/.to_dict()` model helpers, a richer raw-response
-object, per-file model modules, typed error-body models, and `custom_casings`.
-These are tracked and contributions are welcome.
+- **OneBusAway:** **29/29 (100%)** of Stainless's own `OneBusAway/python-sdk`
+  test files import unchanged against stainful's output; generated SDK is
+  mypy-clean; regeneration is byte-stable (the repo dogfoods itself).
+- **OpenAI:** the public `openai-openapi` spec (162 paths, 983 schemas)
+  generates a **mypy-clean** SDK — see [`examples/openai/`](examples/openai/)
+  and [`docs/migrating-from-stainless.md`](docs/migrating-from-stainless.md)
+  for what's verified and what's still on the gap list.
+
+End-to-end behavioral conformance covers: cursor pagination (wire param
+config-driven — `?after=<last_id>` matches openai), SSE streaming with
+`@overload` pairs, multipart / file upload, binary download
+(`audio/mpeg`, `octet-stream`), raw binary request bodies (S3-style PUT),
+typed webhook unwrap (Standard Webhooks scheme).
+
+Not yet at full parity: `.to_json()/.to_dict()` model helpers, richer
+`APIResponse`, typed error-body models, `custom_casings`, anthropic
+bi-directional pagination, multi-content request bodies. The migration
+guide has the honest workaround for each.
 
 **Roadmap:** Python SDK → MCP server from the same model → a second language →
-docs. One language done well first.
+docs site. One language done well first.
 
 ## Contributing
 
@@ -150,8 +156,17 @@ PRs welcome — see [`CONTRIBUTING.md`](CONTRIBUTING.md) and the
 [Code of Conduct](CODE_OF_CONDUCT.md).
 
 ```bash
+git clone https://github.com/stainlu/stainful && cd stainful
+uv venv && uv pip install -e ".[dev,generated-runtime]"
 uv run pytest -q
 uv run ruff check src tests
+
+# regenerate the dogfood SDK (the repo dogfoods itself; CI fails if a
+# regeneration changes a byte — see examples/onebusaway/):
+uv run stainful generate \
+  --spec   examples/onebusaway/openapi.yml \
+  --config examples/onebusaway/stainless.yml \
+  --out    examples/onebusaway/sdk
 ```
 
 ## License
