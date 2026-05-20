@@ -5,6 +5,105 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.4.0] — 2026-05-20
+
+**Three new generators + every documented adoption-blocker closed.**
+One `stainless.yml` now produces a Python SDK + Mintlify-shaped
+`api.md` + a Model Context Protocol server — all OSS, all drop-in for
+Stainless. Migration guide gap list is empty save multi-content
+request bodies (no public Stainless oracle to verify against).
+
+### Added — three new artifacts from the same spec
+
+- **`stainful docs` — Stainless-shaped Markdown API doc.** Per-resource
+  sections (`# Top`, `## Subresource`, `### Sub-sub`), Methods lists
+  with `<code title="<verb> <path>">…</code>` linked into the
+  generated SDK tree, Shared Types block, paginated returns rendered
+  as `SyncCursorPage[Item]` with the item type resolved through
+  `ModelRef → ObjectType`, webhook-unwrap entries deliberately
+  without verb/path. Mintlify-compatible. Oracle:
+  `tests/oracles/openai-python/api.md`.
+- **`stainful mcp` — Model Context Protocol server.** Each HTTP method
+  becomes one MCP tool (`<resource_chain>_<method>`), input schema is
+  faithful JSON Schema (path params + query params + body object
+  expanded), response serialized as `TextContent` (pydantic model →
+  JSON, bytes → base64). Lazy client construction so the module
+  imports cleanly before the env var is set. Stdio transport (Claude
+  Desktop / Cline / mcp-cli compatible). Webhook-unwrap excluded —
+  not a remote call.
+- **Rich `APIResponse[T]` via `with_raw_response.*`.** Was a
+  pass-through pre-v0.4; now a real wrapper exposing `.http_response`,
+  `.status_code`, `.headers`, `.request_id`, `.content`, `.parse() ->
+  T`. ContextVar-based wrapper so concurrent async tasks don't
+  pollute each other. `<Brand>APIResponse` alias at the package root.
+
+### Added — Stainless drop-in symbol surface
+
+- **`custom_casings:` honored.** Both dict-style (`acme_ai_sdk:
+  AcmeAISDK`) and list-of-singletons forms parse into
+  `Config.custom_casings`. Whole-name and per-token overrides in
+  `brand()` / `pascal()`. Was the #1 adoption blocker at v0.3.0 —
+  anyone whose brand wasn't in our 4-entry compound table emitted
+  the wrong class name (`AcmeAi` instead of `AcmeAI`).
+- **`targets.python.package_name` honored.** Was silently dropped —
+  package directory was always derived from `organization.name`
+  (`name: acme-ai-sdk` → `acme_ai/` even when user set
+  `package_name: acme`). Real adoption blocker.
+- **`.to_json()` / `.to_dict()` aliases** on every generated model
+  (route to pydantic v2's `model_dump_json` / `model_dump` with
+  Stainless defaults `by_alias=True, exclude_unset=True`).
+- **Webhook `secret=` env-var fallback.** Generated
+  `client.webhooks.unwrap(...)` / `verify_signature(...)` reads
+  `<BRAND_UPPER>_WEBHOOK_SECRET` when no explicit secret is passed
+  (matches openai-python's `OPENAI_WEBHOOK_SECRET`).
+- **Typed error-body model auto-promoted to
+  `<pkg>.types.shared.ErrorObject`.** Scans the spec's 4XX/default
+  response refs; picks the most common; unwraps single-field
+  `{error: $ref X}` wrappers; prefers error-shaped candidates
+  (`message` + at least one of `code`/`type`/`param`). Real openai
+  spec: `Error(code, message, param, type)` — identical to
+  openai-python's `openai.types.shared.ErrorObject`.
+- **Alternate page class names.** Spec-specific page-class symbols
+  (`SyncTokenPage`, `SyncNextCursorPage`, `SyncConversationCursorPage`,
+  `SyncPageCursor`, …) emitted as aliases in `<pkg>/_core/pagination
+  .py` so `from <pkg>.pagination import <Specific>Page` resolves.
+  All five forward-only cursor variants across openai+anthropic
+  alias to one config-driven generic class.
+- **Anthropic-shape bi-directional pagination.** Distinct algorithm
+  (`before_id` ↔ `after_id` based on initial-request direction).
+  New runtime class `_BiDirectionalPage`; IR detects the shape via
+  `request:`/`response:` patterns; `pagination_cfg` carries the
+  four wire names.
+
+### Fixed
+
+- **`$shared.models` ref normalization.** Real configs use either
+  bare component name (`references: Reference`) or full $ref
+  (`acme_widget_id_string: "#/components/schemas/..."`); we
+  normalize both.
+- **Resource template pagination-import regex** widened from
+  `Sync(Cursor)?Page` to any `Sync<...>Page` so spec-specific
+  aliases import correctly.
+
+### Verified
+
+- **118 tests green** (was 95 at v0.3.0 — 23 new regression tests
+  for the gap-closure work).
+- **mypy 0 on 253 combined source files** (generated openai SDK +
+  generated OneBusAway dogfood + emitter + runtime).
+- Drop-in import parity with openai-python: full resource tree,
+  `<pkg>.types.shared.ErrorObject`, `<pkg>.APIResponse`,
+  `<pkg>.types.ErrorObject`, generic-with-alias page classes.
+- 9 quiet pushes since v0.3.0, all CI-green on py3.10–3.12.
+
+### Honest scope boundaries
+
+Multi-content request bodies (an op declaring `application/json`
+OR `multipart/form-data` OR `application/x-www-form-urlencoded` on
+the same operation) still pick the first match — no public
+Stainless oracle to verify the exact API surface design.
+Documented in the migration guide.
+
 ## [0.3.0] — 2026-05-20
 
 **Nine fixes surfaced by generating a working SDK from the real

@@ -133,8 +133,9 @@ people who want that workflow without a hosted service.
 
 ## Status
 
-**v0.2.0 on PyPI.** Generates complete sync + async SDKs, verified against
-the real Stainless-generated SDKs at pinned SHAs in CI:
+**v0.4.0.** One `stainless.yml` → SDK + Mintlify-shaped `api.md` + MCP
+server. Verified against the real Stainless-generated SDKs at pinned
+SHAs in CI:
 
 - **OneBusAway:** **29/29 (100%)** of Stainless's own `OneBusAway/python-sdk`
   test files import unchanged against stainful's output; generated SDK is
@@ -145,15 +146,24 @@ the real Stainless-generated SDKs at pinned SHAs in CI:
   for what's verified and what's still on the gap list.
 
 End-to-end behavioral conformance covers: cursor pagination (wire param
-config-driven — `?after=<last_id>` matches openai), SSE streaming with
+config-driven — `?after=<last_id>` matches openai), anthropic-shape
+bi-directional pagination (`before_id` ↔ `after_id`), SSE streaming with
 `@overload` pairs, multipart / file upload, binary download
 (`audio/mpeg`, `octet-stream`), raw binary request bodies (S3-style PUT),
-typed webhook unwrap (Standard Webhooks scheme).
+typed webhook unwrap (Standard Webhooks scheme), rich `APIResponse[T]`
+from `with_raw_response.*`, typed error-body models
+(`<pkg>.types.shared.ErrorObject` auto-detected from the spec), spec-
+specific page class symbols (`SyncTokenPage`/`SyncNextCursorPage`/…),
+`custom_casings`, `.to_json()`/`.to_dict()` aliases, webhook
+`<BRAND>_WEBHOOK_SECRET` env-var fallback.
 
-Not yet at full parity: `.to_json()/.to_dict()` model helpers, richer
-`APIResponse`, typed error-body models, `custom_casings`, anthropic
-bi-directional pagination, multi-content request bodies. The migration
-guide has the honest workaround for each.
+**118 tests, mypy 0 on 253 generated files, ruff clean, CI green on
+py3.10–3.12.**
+
+Known scope boundary: multi-content request bodies (one operation
+declaring multiple `requestBody.content` types) still pick the first
+match — no public Stainless oracle to verify the exact API surface.
+Documented in the migration guide.
 
 **Roadmap:** Python SDK → MCP server from the same model → a second language →
 docs site. One language done well first.
