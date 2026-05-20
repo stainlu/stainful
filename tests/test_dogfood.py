@@ -14,6 +14,7 @@ from pathlib import Path
 import pytest
 
 from stainful.config import load_config
+from stainful.emit.mcp import emit_mcp
 from stainful.emit.python import emit
 from stainful.ir.builder import build_ir
 from stainful.openapi.loader import load_spec
@@ -22,10 +23,11 @@ EXAMPLE = Path(__file__).parent.parent / "examples" / "onebusaway"
 COMMITTED = EXAMPLE / "sdk"
 
 _REGEN = (
-    "uv run stainful generate "
-    "--spec examples/onebusaway/openapi.yml "
+    "uv run stainful generate --spec examples/onebusaway/openapi.yml "
+    "--config examples/onebusaway/stainless.yml --out examples/onebusaway/sdk "
+    "&& uv run stainful mcp --spec examples/onebusaway/openapi.yml "
     "--config examples/onebusaway/stainless.yml "
-    "--out examples/onebusaway/sdk"
+    "--out examples/onebusaway/sdk/onebusaway/mcp_server.py"
 )
 
 
@@ -45,6 +47,11 @@ def test_committed_example_sdk_is_in_sync(tmp_path):
         load_config(str(EXAMPLE / "stainless.yml")),
     )
     emit(api, str(tmp_path))
+    # MCP server is treated as part of the dogfood artifact (separate
+    # subcommand, but bit-stability matters here too — if the emitter
+    # touches the MCP template, CI should fail until the example is
+    # regenerated).
+    emit_mcp(api, str(tmp_path / "onebusaway" / "mcp_server.py"))
 
     fresh = _tree(tmp_path / "onebusaway")
     committed = _tree(COMMITTED / "onebusaway")

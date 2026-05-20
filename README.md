@@ -35,6 +35,7 @@ as-is.
 - ⚡ **Sync + async** generated from one model
 - 📦 **Self-contained output** — the generated SDK depends only on `httpx` + `pydantic`
 - 📑 **`stainful docs`** — emit a Stainless-style `api.md` from the same inputs (per-resource sections, Methods lists with verb+path, Mintlify-compatible)
+- 🧰 **`stainful mcp`** — emit a [Model Context Protocol](https://modelcontextprotocol.io/) server (one tool per HTTP method) so Claude / Cline / mcp-cli can call your API as tools
 
 ## Quickstart
 
@@ -46,6 +47,9 @@ stainful generate --spec openapi.yml --config stainless.yml --out ./sdk
 
 # OR emit a Stainless-style api.md doc from the same inputs
 stainful docs --spec openapi.yml --config stainless.yml --out ./api.md
+
+# OR emit an MCP server inside the generated SDK
+stainful mcp --spec openapi.yml --config stainless.yml --out ./sdk/<pkg>/mcp_server.py
 ```
 
 The generated SDK feels like an official client:
