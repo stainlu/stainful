@@ -21,7 +21,6 @@ from ._exceptions import (
     APITimeoutError,
     status_error_for,
 )
-from ._models import BaseModel
 from ._request_options import RequestOptions
 from ._sentinels import NotGiven
 
@@ -134,34 +133,39 @@ class _BaseClient:
             return response.text or None
 
     def _process_response_data(
-        self, *, data: Any, cast_to: type | None, response: httpx.Response
+        self, *, data: Any, cast_to: Any, response: httpx.Response
     ) -> Any:
         if cast_to is None:
             return data
         if cast_to is bytes:                       # binary download endpoint
             return response.content
-        import typing
-
         import pydantic
 
-        origin = typing.get_origin(cast_to) or cast_to
-        if isinstance(origin, type) and issubclass(origin, BaseModel):
-            try:
-                # TypeAdapter also handles parametrized page generics
-                # (e.g. SyncCursorPage[Widget]); plain models work too.
-                model: Any = pydantic.TypeAdapter(cast_to).validate_python(data)
-            except Exception as exc:  # pydantic.ValidationError et al.
-                raise APIResponseValidationError(
-                    response, data, message=str(exc)
-                ) from exc
-            try:
-                object.__setattr__(
-                    model, "_request_id", response.headers.get("x-request-id")
-                )
-            except (AttributeError, ValueError):
-                pass
-            return model
-        return data
+        # TypeAdapter handles: plain BaseModel subclasses, parametrized
+        # generics (`SyncCursorPage[Widget]`), and type forms like
+        # `Annotated[Union[Variant0, Variant1], Field(discriminator="type")]`
+        # — the discriminated-union response shape from real specs (e.g.
+        # openai audio.transcriptions returns a tagged-union object).
+        # If `cast_to` isn't a pydantic-acceptable form, TypeAdapter
+        # construction raises `pydantic.PydanticSchemaGenerationError`; fall
+        # through and return raw data so non-modeled responses still work.
+        try:
+            adapter: Any = pydantic.TypeAdapter(cast_to)
+        except pydantic.PydanticSchemaGenerationError:
+            return data
+        try:
+            model: Any = adapter.validate_python(data)
+        except pydantic.ValidationError as exc:
+            raise APIResponseValidationError(
+                response, data, message=str(exc)
+            ) from exc
+        try:
+            object.__setattr__(
+                model, "_request_id", response.headers.get("x-request-id")
+            )
+        except (AttributeError, ValueError):
+            pass
+        return model
 
 
 class SyncAPIClient(_BaseClient):
@@ -171,7 +175,7 @@ class SyncAPIClient(_BaseClient):
 
     def _request(
         self, method: str, path: str, *, options: RequestOptions,
-        cast_to: type | None, json_body: Any = None,
+        cast_to: Any, json_body: Any = None,
         stream: bool = False, stream_cls: type | None = None,
         multipart: bool = False, binary: bool = False,
     ) -> Any:
@@ -212,14 +216,14 @@ class SyncAPIClient(_BaseClient):
             raise last_exc
         raise RuntimeError("unreachable")  # pragma: no cover
 
-    def _get(self, path: str, *, options: RequestOptions, cast_to: type | None) -> Any:
+    def _get(self, path: str, *, options: RequestOptions, cast_to: Any) -> Any:
         return self._request("GET", path, options=options, cast_to=cast_to)
 
-    def _delete(self, path: str, *, options: RequestOptions, cast_to: type | None) -> Any:
+    def _delete(self, path: str, *, options: RequestOptions, cast_to: Any) -> Any:
         return self._request("DELETE", path, options=options, cast_to=cast_to)
 
     def _post(self, path: str, *, body: Any = None, options: RequestOptions,
-              cast_to: type | None, stream: bool = False,
+              cast_to: Any, stream: bool = False,
               stream_cls: type | None = None,
               multipart: bool = False, binary: bool = False) -> Any:
         return self._request("POST", path, options=options, cast_to=cast_to,
@@ -228,14 +232,14 @@ class SyncAPIClient(_BaseClient):
                              multipart=multipart, binary=binary)
 
     def _put(self, path: str, *, body: Any = None, options: RequestOptions,
-             cast_to: type | None,
+             cast_to: Any,
              multipart: bool = False, binary: bool = False) -> Any:
         return self._request("PUT", path, options=options, cast_to=cast_to,
                              json_body=body,
                              multipart=multipart, binary=binary)
 
     def _patch(self, path: str, *, body: Any = None, options: RequestOptions,
-               cast_to: type | None,
+               cast_to: Any,
                multipart: bool = False, binary: bool = False) -> Any:
         return self._request("PATCH", path, options=options, cast_to=cast_to,
                              json_body=body,
@@ -265,7 +269,7 @@ class AsyncAPIClient(_BaseClient):
 
     async def _request(
         self, method: str, path: str, *, options: RequestOptions,
-        cast_to: type | None, json_body: Any = None,
+        cast_to: Any, json_body: Any = None,
         stream: bool = False, stream_cls: type | None = None,
         multipart: bool = False, binary: bool = False,
     ) -> Any:
@@ -309,15 +313,15 @@ class AsyncAPIClient(_BaseClient):
         raise RuntimeError("unreachable")  # pragma: no cover
 
     async def _get(self, path: str, *, options: RequestOptions,
-                    cast_to: type | None) -> Any:
+                    cast_to: Any) -> Any:
         return await self._request("GET", path, options=options, cast_to=cast_to)
 
     async def _delete(self, path: str, *, options: RequestOptions,
-                       cast_to: type | None) -> Any:
+                       cast_to: Any) -> Any:
         return await self._request("DELETE", path, options=options, cast_to=cast_to)
 
     async def _post(self, path: str, *, body: Any = None, options: RequestOptions,
-                     cast_to: type | None, stream: bool = False,
+                     cast_to: Any, stream: bool = False,
                      stream_cls: type | None = None,
                      multipart: bool = False, binary: bool = False) -> Any:
         return await self._request("POST", path, options=options, cast_to=cast_to,
@@ -326,14 +330,14 @@ class AsyncAPIClient(_BaseClient):
                                    multipart=multipart, binary=binary)
 
     async def _put(self, path: str, *, body: Any = None, options: RequestOptions,
-                    cast_to: type | None,
+                    cast_to: Any,
                     multipart: bool = False, binary: bool = False) -> Any:
         return await self._request("PUT", path, options=options, cast_to=cast_to,
                                    json_body=body,
                                    multipart=multipart, binary=binary)
 
     async def _patch(self, path: str, *, body: Any = None, options: RequestOptions,
-                      cast_to: type | None,
+                      cast_to: Any,
                       multipart: bool = False, binary: bool = False) -> Any:
         return await self._request("PATCH", path, options=options, cast_to=cast_to,
                                    json_body=body,

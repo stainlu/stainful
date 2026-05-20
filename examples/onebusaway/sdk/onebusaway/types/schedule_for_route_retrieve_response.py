@@ -10,6 +10,7 @@ from typing import (  # noqa: F401
 from pydantic import Field  # noqa: F401
 
 from .._core._models import BaseModel  # noqa: F401
+from .._core._types import FileTypes  # noqa: F401
 from .._utils import PropertyInfo  # noqa: F401
 
 from .shared import ResponseWrapper

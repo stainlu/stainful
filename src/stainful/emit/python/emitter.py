@@ -350,6 +350,7 @@ class _Emitter:
         "    Annotated, Any, Dict, List, Literal, Optional, TypedDict, Union,\n)\n\n"
         "from pydantic import Field  # noqa: F401\n\n"
         "from .._core._models import BaseModel  # noqa: F401\n"
+        "from .._core._types import FileTypes  # noqa: F401\n"
         "from .._utils import PropertyInfo  # noqa: F401\n"
     )
 

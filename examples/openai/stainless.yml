@@ -1,9 +1,9 @@
 organization:
   name: openai
 
-# v1 vertical slice: chat.completions only — exercises POST + streaming (SSE)
-# + cursor pagination + path params + nested subresource. Iteratively
-# expand from here.
+# Representative slice — exercises every capability stainful v0.2+ supports:
+# streaming, JSON body, multipart upload, binary download, cursor pagination,
+# nested subresources. Not the full openai surface; expand iteratively.
 
 resources:
   chat:
@@ -14,7 +14,6 @@ resources:
             endpoint: "post /chat/completions"
             streaming:
               type: sse
-              # stream_event_model picks a component schema for the SSE event
               stream_event_model: CreateChatCompletionStreamResponse
               param_discriminator: stream
           retrieve:
@@ -32,6 +31,78 @@ resources:
               list:
                 endpoint: "get /chat/completions/{completion_id}/messages"
                 paginated: true
+
+  embeddings:                    # simple POST JSON → JSON
+    methods:
+      create:
+        endpoint: "post /embeddings"
+
+  files:                         # multipart upload + list + retrieve + delete + content
+    methods:
+      create:
+        endpoint: "post /files"
+      list:
+        endpoint: "get /files"
+        paginated: true
+      retrieve:
+        endpoint: "get /files/{file_id}"
+      delete:
+        endpoint: "delete /files/{file_id}"
+      content:
+        endpoint: "get /files/{file_id}/content"
+
+  audio:                         # speech (binary out) + transcriptions (multipart in + streaming)
+    subresources:
+      speech:
+        methods:
+          create:
+            endpoint: "post /audio/speech"
+      transcriptions:
+        methods:
+          create:
+            endpoint: "post /audio/transcriptions"
+            streaming:
+              type: sse
+              stream_event_model: CreateTranscriptionResponseStreamEvent
+              param_discriminator: stream
+
+  fine_tuning:                   # nested subresources w/ pagination
+    subresources:
+      jobs:
+        methods:
+          create:
+            endpoint: "post /fine_tuning/jobs"
+          list:
+            endpoint: "get /fine_tuning/jobs"
+            paginated: true
+          retrieve:
+            endpoint: "get /fine_tuning/jobs/{fine_tuning_job_id}"
+          cancel:
+            endpoint: "post /fine_tuning/jobs/{fine_tuning_job_id}/cancel"
+          pause:
+            endpoint: "post /fine_tuning/jobs/{fine_tuning_job_id}/pause"
+          resume:
+            endpoint: "post /fine_tuning/jobs/{fine_tuning_job_id}/resume"
+        subresources:
+          checkpoints:
+            methods:
+              list:
+                endpoint: "get /fine_tuning/jobs/{fine_tuning_job_id}/checkpoints"
+                paginated: true
+          events:
+            methods:
+              list:
+                endpoint: "get /fine_tuning/jobs/{fine_tuning_job_id}/events"
+                paginated: true
+
+  models:                        # simple list/retrieve/delete (no pagination in openai)
+    methods:
+      list:
+        endpoint: "get /models"
+      retrieve:
+        endpoint: "get /models/{model}"
+      delete:
+        endpoint: "delete /models/{model}"
 
 pagination:
   # OpenAI/Stainless `SyncCursorPage` — `?after=<last_id>`, response has
