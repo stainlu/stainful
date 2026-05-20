@@ -61,7 +61,7 @@ class _BaseClient:
 
     def _build_request(
         self, method: str, path: str, options: RequestOptions, json_body: Any,
-        multipart: bool = False,
+        multipart: bool = False, binary: bool = False,
     ) -> httpx.Request:
         url = self._base_url.join(path.lstrip("/"))
         params = dict(self._auth_query)
@@ -79,6 +79,16 @@ class _BaseClient:
         body = json_body if json_body is not None else options.extra_body
         # build_request (not httpx.Request) carries per-request timeout via
         # request.extensions; works identically for sync + async clients.
+        if binary:
+            # raw octet-stream upload (S3 PUT object, GitHub release asset,
+            # …). `body` is bytes / bytes-like / a file-like reader; we send
+            # it verbatim with the octet-stream content-type.
+            headers.setdefault("Content-Type", "application/octet-stream")
+            return self._client.build_request(
+                method, url, params=params, headers=headers,
+                content=body,
+                timeout=httpx.Timeout(timeout),
+            )
         if multipart and isinstance(body, dict):
             # split file-like values into `files`, scalars into `data`;
             # httpx then sets the multipart/form-data content-type itself.
@@ -163,10 +173,11 @@ class SyncAPIClient(_BaseClient):
         self, method: str, path: str, *, options: RequestOptions,
         cast_to: type | None, json_body: Any = None,
         stream: bool = False, stream_cls: type | None = None,
-        multipart: bool = False,
+        multipart: bool = False, binary: bool = False,
     ) -> Any:
         request = self._build_request(
-            method, path, options, json_body, multipart=multipart
+            method, path, options, json_body,
+            multipart=multipart, binary=binary,
         )
         last_exc: Exception | None = None
         for attempt in range(self._max_retries + 1):
@@ -209,20 +220,26 @@ class SyncAPIClient(_BaseClient):
 
     def _post(self, path: str, *, body: Any = None, options: RequestOptions,
               cast_to: type | None, stream: bool = False,
-              stream_cls: type | None = None, multipart: bool = False) -> Any:
+              stream_cls: type | None = None,
+              multipart: bool = False, binary: bool = False) -> Any:
         return self._request("POST", path, options=options, cast_to=cast_to,
                              json_body=body, stream=stream,
-                             stream_cls=stream_cls, multipart=multipart)
+                             stream_cls=stream_cls,
+                             multipart=multipart, binary=binary)
 
     def _put(self, path: str, *, body: Any = None, options: RequestOptions,
-             cast_to: type | None) -> Any:
+             cast_to: type | None,
+             multipart: bool = False, binary: bool = False) -> Any:
         return self._request("PUT", path, options=options, cast_to=cast_to,
-                             json_body=body)
+                             json_body=body,
+                             multipart=multipart, binary=binary)
 
     def _patch(self, path: str, *, body: Any = None, options: RequestOptions,
-               cast_to: type | None) -> Any:
+               cast_to: type | None,
+               multipart: bool = False, binary: bool = False) -> Any:
         return self._request("PATCH", path, options=options, cast_to=cast_to,
-                             json_body=body)
+                             json_body=body,
+                             multipart=multipart, binary=binary)
 
     def _get_api_list(
         self, path: str, *, page: type, options: RequestOptions,
@@ -250,12 +267,13 @@ class AsyncAPIClient(_BaseClient):
         self, method: str, path: str, *, options: RequestOptions,
         cast_to: type | None, json_body: Any = None,
         stream: bool = False, stream_cls: type | None = None,
-        multipart: bool = False,
+        multipart: bool = False, binary: bool = False,
     ) -> Any:
         import asyncio
 
         request = self._build_request(
-            method, path, options, json_body, multipart=multipart
+            method, path, options, json_body,
+            multipart=multipart, binary=binary,
         )
         last_exc: Exception | None = None
         for attempt in range(self._max_retries + 1):
@@ -301,20 +319,25 @@ class AsyncAPIClient(_BaseClient):
     async def _post(self, path: str, *, body: Any = None, options: RequestOptions,
                      cast_to: type | None, stream: bool = False,
                      stream_cls: type | None = None,
-                     multipart: bool = False) -> Any:
+                     multipart: bool = False, binary: bool = False) -> Any:
         return await self._request("POST", path, options=options, cast_to=cast_to,
                                    json_body=body, stream=stream,
-                                   stream_cls=stream_cls, multipart=multipart)
+                                   stream_cls=stream_cls,
+                                   multipart=multipart, binary=binary)
 
     async def _put(self, path: str, *, body: Any = None, options: RequestOptions,
-                    cast_to: type | None) -> Any:
+                    cast_to: type | None,
+                    multipart: bool = False, binary: bool = False) -> Any:
         return await self._request("PUT", path, options=options, cast_to=cast_to,
-                                   json_body=body)
+                                   json_body=body,
+                                   multipart=multipart, binary=binary)
 
     async def _patch(self, path: str, *, body: Any = None, options: RequestOptions,
-                      cast_to: type | None) -> Any:
+                      cast_to: type | None,
+                      multipart: bool = False, binary: bool = False) -> Any:
         return await self._request("PATCH", path, options=options, cast_to=cast_to,
-                                   json_body=body)
+                                   json_body=body,
+                                   multipart=multipart, binary=binary)
 
     async def _get_api_list(
         self, path: str, *, page: type, options: RequestOptions,

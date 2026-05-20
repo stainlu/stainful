@@ -557,18 +557,27 @@ class _Emitter:
         body_build = ""
         body_kwarg = ""
         if has_body_arg and all_body:
-            items = "".join(f'\n            "{w}": {py},' for py, w in all_body)
-            body_build = (
-                f"        _body = {{{items}\n        }}\n"
-                f"        _body = {{k: v for k, v in _body.items() "
-                f"if v is not not_given}}\n"
-            )
-            if m.body is not None and m.body.content_type == ContentType.MULTIPART:
-                # multipart: pass raw (files mustn't be JSON-coerced); the
-                # runtime splits file-like values into `files`, rest into `data`
-                body_kwarg = "\n            body=_body,\n            multipart=True,"
+            if m.body is not None and m.body.content_type == ContentType.BINARY:
+                # raw octet-stream upload (S3 PUT object, GitHub release asset,
+                # …). One opaque `body` param of `bytes` is sent verbatim;
+                # never JSON-encoded, never dict-wrapped. The runtime sets
+                # the `application/octet-stream` content-type.
+                body_kwarg = "\n            body=body,\n            binary=True,"
             else:
-                body_kwarg = "\n            body=to_jsonable(_body),"
+                items = "".join(
+                    f'\n            "{w}": {py},' for py, w in all_body
+                )
+                body_build = (
+                    f"        _body = {{{items}\n        }}\n"
+                    f"        _body = {{k: v for k, v in _body.items() "
+                    f"if v is not not_given}}\n"
+                )
+                if m.body is not None and m.body.content_type == ContentType.MULTIPART:
+                    # multipart: pass raw (files mustn't be JSON-coerced); the
+                    # runtime splits file-like values into `files`, rest into `data`
+                    body_kwarg = "\n            body=_body,\n            multipart=True,"
+                else:
+                    body_kwarg = "\n            body=to_jsonable(_body),"
         params_items = "".join(
             f'\n            "{w}": {py},' for py, w, _a in query_props
         )

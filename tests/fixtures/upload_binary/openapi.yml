@@ -1,0 +1,37 @@
+openapi: 3.0.0
+info:
+  title: BinaryUpload
+  version: 1.0.0
+servers:
+  - url: https://api.binary-upload.test
+paths:
+  /buckets/{bucket}/objects/{key}:
+    put:
+      # S3-style raw octet-stream upload (also: GitHub release-asset upload).
+      operationId: putObject
+      parameters:
+        - name: bucket
+          in: path
+          required: true
+          schema: { type: string }
+        - name: key
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/octet-stream:
+            schema: { type: string, format: binary }
+      responses:
+        "200":
+          description: stored
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [etag]
+                properties:
+                  etag: { type: string }
+components:
+  schemas: {}

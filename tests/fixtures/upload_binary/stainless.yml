@@ -1,0 +1,15 @@
+organization:
+  name: binary-upload
+
+resources:
+  objects:
+    methods:
+      put:
+        endpoint: "put /buckets/{bucket}/objects/{key}"
+
+targets:
+  python:
+    package_name: binary_upload
+
+environments:
+  production: https://api.binary-upload.test

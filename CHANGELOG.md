@@ -6,6 +6,21 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Added
+- **Raw binary request bodies (`application/octet-stream` uploads).**
+  S3-style `PUT object`, GitHub release-asset upload, and similar raw
+  uploads now work end-to-end: the emitter generates `body: bytes`,
+  the runtime sends it verbatim with
+  `Content-Type: application/octet-stream`, sync + async. Fixes a
+  latent codegen flaw — previously the emitter wrapped the bytes in
+  `_body = {"None": body}` and called `to_jsonable` on it; no fixture
+  or dogfood exercised the path, so nothing in the wild was hitting
+  it. New `tests/fixtures/upload_binary/` + `tests/test_binary_upload.py`
+  asserts the wire body is the exact bytes and the content-type is
+  octet-stream. **Known scope boundary:** endpoints declaring *multiple*
+  request content types on the same op (JSON OR multipart OR octet-
+  stream on the same op) still pick the first match; the
+  alternative-content case has no public Stainless oracle and is
+  deferred — separate work.
 - **Binary responses.** Non-JSON 200s (audio/*, octet-stream, image/*, …) used to get no type and be JSON-parsed (mangled). Now download endpoints (e.g. OpenAI `audio.speech`) return raw `bytes`, sync + async. Fixture + conformance test; mypy-clean.
 - **Multipart / file upload (RESEARCH §4 #10).** `multipart/form-data`
   bodies were emitted as one opaque param and sent as JSON (broken for
