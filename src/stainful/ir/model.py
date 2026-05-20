@@ -98,6 +98,18 @@ class BodyShape:
     content_type: ContentType
     type: Type
     required: bool = True
+    # True for endpoints that declare multiple `requestBody.content` types
+    # (typically JSON + multipart/form-data). The emitter generates one
+    # method whose runtime dispatch picks the wire shape from the
+    # arguments — if file-like values are present in `file_paths`, send
+    # multipart; else JSON. Oracle: openai-python's `skills.create` etc.
+    multi_content: bool = False
+    # Paths into the body where binary/file-like values live (used by
+    # the runtime's `extract_files` to know what to lift out as multipart
+    # parts vs. keep in the JSON body). `<array>` is a wildcard index
+    # segment for List[FileTypes] fields. Empty for non-multi-content
+    # bodies. Example: `[["files", "<array>"], ["files"]]`.
+    file_paths: tuple[tuple[str, ...], ...] = ()
 
 
 @dataclass(frozen=True)

@@ -1,0 +1,51 @@
+openapi: 3.0.0
+info:
+  title: Skills
+  version: 1.0.0
+servers:
+  - url: https://api.skills.test
+paths:
+  /skills:
+    post:
+      # Real-spec shape: JSON OR multipart on the same op. When the user
+      # passes file-like values via `files=`, the SDK sends multipart;
+      # else it sends JSON. Oracle: openai-python's `skills.create`.
+      operationId: createSkill
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SkillJSONBody" }
+          multipart/form-data:
+            schema: { $ref: "#/components/schemas/SkillMultipartBody" }
+      responses:
+        "200":
+          description: created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Skill" }
+components:
+  schemas:
+    SkillJSONBody:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string, description: Display name for the skill. }
+        description: { type: string }
+    SkillMultipartBody:
+      type: object
+      required: [files]
+      properties:
+        name: { type: string }
+        description: { type: string }
+        files:
+          # Array-of-files — the runtime extracts each one as a multipart
+          # part with the wire name `files[]`.
+          type: array
+          items: { type: string, format: binary }
+    Skill:
+      type: object
+      required: [id, name]
+      properties:
+        id: { type: string }
+        name: { type: string }

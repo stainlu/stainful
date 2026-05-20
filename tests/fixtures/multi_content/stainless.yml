@@ -1,0 +1,15 @@
+organization:
+  name: skills
+
+resources:
+  skills:
+    methods:
+      create:
+        endpoint: "post /skills"
+
+targets:
+  python:
+    package_name: skills
+
+environments:
+  production: https://api.skills.test

@@ -126,16 +126,14 @@ SDKs at pinned SHAs (CI-gated):
 stainful is at v0.2.0 — solid but younger than Stainless. The features
 below are tracked; PRs welcome.
 
-| Gap | Workaround |
-|---|---|
-| `custom_casings` config block not yet honored | A small built-in compound-brand table handles `openai → OpenAI`, `openapi → OpenAPI`, `anthropic → Anthropic`, `cloudflare → Cloudflare`. Others: open an issue with the name. |
-| `.to_json()` / `.to_dict()` model helpers | Use `pydantic.BaseModel.model_dump()` / `model_dump_json()` directly — the generated models inherit from pydantic v2 `BaseModel`. |
-| Rich `APIResponse` wrapper around `with_raw_response.*` | The `with_raw_response.<method>` wrappers exist but are pass-throughs today; richer raw-response helpers are v1.1 backlog. |
-| Typed error-body models | Errors carry `body: object | None` (parsed dict) plus `code` / `param` / `type` if present; typed body classes are v1.1 backlog. |
-| Anthropic bi-directional `SyncPage` (before_id vs after_id) | Forward-only cursor pagination only; bi-directional support is tracked separately. |
-| Multi-content request bodies (one op declaring JSON OR multipart OR octet-stream) | Picks the first match; multi-form selection is a documented gap (no public Stainless oracle to verify against). |
-| Webhook client-level `<brand>_webhook_secret` env var fallback | Pass `secret=` to `client.webhooks.unwrap(...)` / `verify_signature(...)` explicitly; client-level fallback is tracked. |
-| Alternate page class names (`SyncNextCursorPage`, `SyncTokenPage`, `SyncPageCursor`, …) | One generic `SyncCursorPage[T]` algorithm with config-driven wire param (e.g. `?after=<last_id>`) covers the five forward-only openai/anthropic variants. If you specifically need the distinct *class name*, open an issue. |
+As of v0.5 the migration-guide gap list is **empty** — every previously
+deferred item has shipped. Earlier entries (`custom_casings`, rich
+`APIResponse`, typed error-body models, anthropic bi-directional
+pagination, alternate page class names, webhook env-var fallback,
+multi-content request bodies, `.to_json()`/`.to_dict()` aliases) are
+all live in the generated SDK. If you hit a real mismatch with what
+Stainless was emitting for your spec, please open an issue — it's
+genuinely useful signal.
 
 ---
 

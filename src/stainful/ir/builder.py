@@ -243,6 +243,36 @@ class _Builder:
         if not request_body:
             return None
         content = request_body.get("content", {}) or {}
+        # Multi-content detection: spec declares 2+ content shapes AND one
+        # of them is multipart. The emitter handles this with one method
+        # whose runtime extracts file-like values from the body — if
+        # present, send multipart; else send the primary (JSON) shape.
+        # Oracle: openai-python's `skills.create` / `containers.files.create`.
+        json_media = "application/json"
+        multipart_media = "multipart/form-data"
+        is_multi = (
+            len([m for m in content if m in _CONTENT_TYPES]) > 1
+            and multipart_media in content
+        )
+        if is_multi and json_media in content:
+            # Multipart shape is the superset (JSON's fields are typically
+            # a subset; multipart adds `files`/etc.) — use it as the IR
+            # type so the method signature exposes file params. The
+            # runtime auto-detects at call time: if file-like values are
+            # actually present, send multipart; else send JSON without
+            # the file fields. Oracle: openai-python's `skills.create`
+            # signature is the multipart shape.
+            multipart_schema = (
+                content[multipart_media].get("schema") or {}
+            )
+            file_paths = self._collect_file_paths(multipart_schema)
+            return BodyShape(
+                content_type=ContentType.JSON,           # primary wire = JSON
+                type=self._type(multipart_schema),       # signature = multipart
+                required=bool(request_body.get("required", False)),
+                multi_content=True,
+                file_paths=tuple(tuple(p) for p in file_paths),
+            )
         for media, ct in _CONTENT_TYPES.items():
             if media in content:
                 schema = content[media].get("schema", {}) or {}
@@ -252,6 +282,51 @@ class _Builder:
                     required=bool(request_body.get("required", False)),
                 )
         return None
+
+    def _collect_file_paths(self, schema: dict) -> list[list[str]]:
+        """Walk a multipart schema; return paths to binary/file properties.
+
+        `<array>` segment represents a List[FileTypes]-style field — the
+        runtime's `extract_files` recognizes it as a wildcard index.
+        Oracle: openai-python's `skills.create` paths
+        (e.g., `[["files", "<array>"], ["files"]]`).
+        """
+        if not isinstance(schema, dict):
+            return []
+        # Resolve $ref one hop.
+        if "$ref" in schema:
+            ref = schema["$ref"]
+            if isinstance(ref, str) and ref.startswith(_SCHEMA_PREFIX):
+                name = ref[len(_SCHEMA_PREFIX):]
+                schema = self.doc.schemas.get(name, {})
+
+        def _walk(s: dict, prefix: list[str]) -> list[list[str]]:
+            if not isinstance(s, dict):
+                return []
+            out: list[list[str]] = []
+            # `string + format:binary` is a single file
+            if s.get("type") == "string" and s.get("format") == "binary":
+                out.append(prefix[:])
+                return out
+            # `array of files`
+            if s.get("type") == "array":
+                items = s.get("items") or {}
+                if isinstance(items, dict):
+                    if items.get("type") == "string" and items.get("format") == "binary":
+                        out.append(prefix + ["<array>"])
+                        # Also emit the bare path — openai-python's
+                        # `extract_files` accepts either shape for users
+                        # who pass a single file as the value.
+                        out.append(prefix[:])
+                    out.extend(_walk(items, prefix + ["<array>"]))
+                return out
+            # object properties — recurse
+            props = s.get("properties") or {}
+            for k, v in props.items():
+                out.extend(_walk(v, prefix + [k]))
+            return out
+
+        return _walk(schema, [])
 
     def _responses(self, responses: dict) -> dict[str, Type]:
         out: dict[str, Type] = {}

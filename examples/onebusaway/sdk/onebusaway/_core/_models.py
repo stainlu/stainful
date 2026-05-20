@@ -12,7 +12,89 @@ from typing import Any, Optional
 
 import pydantic
 
-__all__ = ["BaseModel", "to_jsonable"]
+__all__ = ["BaseModel", "to_jsonable", "extract_files"]
+
+
+def extract_files(
+    body: dict, paths: list[list[str]],
+) -> list[tuple[str, Any]]:
+    """Walk `body` at each `path`, lift out file-like values, return them
+    as a list of `(wire_name, value)` tuples — and **mutate** `body` to
+    remove them. Oracle: openai-python's `_utils.extract_files`. The
+    runtime then sends multipart with `files=<list>` and `data=<body>`.
+
+    Each path is a sequence of dict keys / `<array>` sentinels. A
+    `<array>` segment means "iterate over the list at this position" —
+    used for `files: List[FileTypes]` shapes (List of file uploads).
+
+    A file-like value is anything our multipart `_is_file` recognizes:
+    `bytes`, `bytearray`, `IO[bytes]`-likes, or `(filename, data[,
+    content_type])` tuples.
+    """
+    out: list[tuple[str, Any]] = []
+    for path in paths:
+        _extract_at(body, list(path), [], out)
+    return out
+
+
+def _is_file(v: Any) -> bool:
+    return (
+        isinstance(v, (bytes, bytearray, tuple))
+        or hasattr(v, "read")
+    )
+
+
+def _extract_at(
+    cur: Any, remaining: list, name_parts: list[str],
+    out: list[tuple[str, Any]],
+) -> None:
+    """Recursive descent. `cur` is the current node; `remaining` is the
+    rest of the path; `name_parts` is the wire-name accumulator
+    (for `<array>` segments, we emit `<name>[]`).
+    """
+    if not remaining:
+        # Reached a leaf — extract if file-like.
+        if _is_file(cur):
+            out.append(("".join(name_parts), cur))
+        return
+    seg = remaining[0]
+    rest = remaining[1:]
+    if seg == "<array>":
+        if isinstance(cur, list):
+            # Walk each list element. Wire name uses `[]` per
+            # multipart convention.
+            for item in cur:
+                _extract_at(item, rest, name_parts + ["[]"], out)
+            # Also support the case where the user passed a single
+            # file to a List[FileTypes] field (a real ergonomic
+            # mistake we forgive).
+            if _is_file(cur):
+                out.append(("".join(name_parts) + "[]", cur))
+        elif _is_file(cur):
+            # Single-file shorthand for an array slot.
+            out.append(("".join(name_parts) + "[]", cur))
+        return
+    # Object segment — descend into the dict and pop the file out of it
+    # when found.
+    if not isinstance(cur, dict) or seg not in cur:
+        return
+    next_name = name_parts + [seg] if not name_parts else name_parts + [f"[{seg}]"]
+    val = cur[seg]
+    if not rest and _is_file(val):
+        # Pop the file-like value out of the parent dict so it doesn't
+        # also appear in the JSON-encoded data part.
+        out.append(("".join(next_name), val))
+        del cur[seg]
+        return
+    if rest and rest[0] == "<array>" and isinstance(val, list):
+        # Special case for `files: [...]` — extract every list element
+        # and clear the parent's slot so it doesn't ALSO get encoded.
+        for item in val:
+            _extract_at(item, rest[1:], next_name + ["[]"], out)
+        if any(_is_file(item) for item in val):
+            del cur[seg]
+        return
+    _extract_at(val, rest, next_name, out)
 
 
 def to_jsonable(obj: Any) -> Any:

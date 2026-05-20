@@ -619,11 +619,26 @@ class _Emitter:
             return [("body", None, self._render(m.body.type, root, frozenset()),
                      m.body.required)]
         out = []
+        # Treat a multipart body OR a multi-content body the same way for
+        # file-typed fields: binary scalars become `FileTypes`,
+        # arrays-of-binary become `List[FileTypes]` (matches openai-
+        # python's `skills.create(files: List[FileTypes] | Omit = omit)`).
+        wants_file_typing = (
+            ct == ContentType.MULTIPART
+            or (m.body is not None and m.body.multi_content)
+        )
         for p in obj.properties:
-            if ct == ContentType.MULTIPART and isinstance(
+            if wants_file_typing and isinstance(
                 p.type, PrimitiveType
             ) and p.type.kind == PrimitiveKind.BYTES:
-                ann = "FileTypes"          # binary upload field
+                ann = "FileTypes"
+            elif (
+                wants_file_typing
+                and isinstance(p.type, ArrayType)
+                and isinstance(p.type.item, PrimitiveType)
+                and p.type.item.kind == PrimitiveKind.BYTES
+            ):
+                ann = "List[FileTypes]"
             else:
                 ann = self._render(p.type, f"{root}{pascal(p.name)}", frozenset())
             out.append((self._py_field_name(p.name), p.name, ann, p.required))
@@ -839,7 +854,22 @@ class _Emitter:
                     f"        _body = {{k: v for k, v in _body.items() "
                     f"if v is not not_given}}\n"
                 )
-                if m.body is not None and m.body.content_type == ContentType.MULTIPART:
+                if m.body is not None and m.body.multi_content:
+                    # Multi-content auto-detect (JSON ↔ multipart). Walk
+                    # the configured file paths; if any file-like values
+                    # are present, send multipart with `files=`; else
+                    # send the typed shape as JSON. Oracle: openai-
+                    # python's `skills.create` etc.
+                    paths_lit = repr([list(p) for p in m.body.file_paths])
+                    body_build += (
+                        f"        _files = _extract_files(_body, "
+                        f"paths={paths_lit})\n"
+                    )
+                    body_kwarg = (
+                        "\n            body=_body if _files else to_jsonable(_body),"
+                        "\n            files=_files or None,"
+                    )
+                elif m.body is not None and m.body.content_type == ContentType.MULTIPART:
                     # multipart: pass raw (files mustn't be JSON-coerced); the
                     # runtime splits file-like values into `files`, rest into `data`
                     body_kwarg = "\n            body=_body,\n            multipart=True,"
@@ -1050,6 +1080,10 @@ class _Emitter:
             f"from {self.pkg}._core._models import to_jsonable\n"
             if "to_jsonable(" in scan else ""
         )
+        extract_files_import = (
+            f"from {self.pkg}._core._models import extract_files as _extract_files\n"
+            if "_extract_files(" in scan else ""
+        )
         # Match any `Sync<...>Page` / `Async<...>Page` symbol — covers the
         # runtime's built-in `SyncCursorPage` / `SyncPage` and the spec-
         # specific aliases the emitter appends to `_core/pagination.py`
@@ -1112,7 +1146,7 @@ from {self.pkg}._core._response import (
 )
 from {self.pkg}._core._sentinels import NotGiven, not_given
 from {self.pkg}._core._types import Body, FileTypes, Headers, Query  # noqa: F401
-{stream_import}{jsonable_import}{pag_import}{webhook_import}{pydantic_import}{sub_import}{models_import}
+{stream_import}{jsonable_import}{extract_files_import}{pag_import}{webhook_import}{pydantic_import}{sub_import}{models_import}
 __all__ = ["{cls}", "Async{cls}"]
 
 

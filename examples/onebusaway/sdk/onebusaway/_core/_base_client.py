@@ -61,6 +61,7 @@ class _BaseClient:
     def _build_request(
         self, method: str, path: str, options: RequestOptions, json_body: Any,
         multipart: bool = False, binary: bool = False,
+        files: Any = None,
     ) -> httpx.Request:
         url = self._base_url.join(path.lstrip("/"))
         params = dict(self._auth_query)
@@ -88,14 +89,26 @@ class _BaseClient:
                 content=body,
                 timeout=httpx.Timeout(timeout),
             )
+        if files is not None:
+            # Multi-content auto-detect path: emitter pre-extracted the
+            # file-like values via `extract_files(body, paths)`. `body`
+            # carries the non-file scalars (as `data`), `files` carries
+            # the multipart parts. httpx sets the content-type with
+            # boundary itself. Oracle: openai-python's `skills.create`.
+            return self._client.build_request(
+                method, url, params=params, headers=headers,
+                data=body if isinstance(body, dict) else None,
+                files=files,
+                timeout=httpx.Timeout(timeout),
+            )
         if multipart and isinstance(body, dict):
-            # split file-like values into `files`, scalars into `data`;
-            # httpx then sets the multipart/form-data content-type itself.
-            files = {k: v for k, v in body.items() if self._is_file(v)}
+            # Single-content multipart (e.g. transcriptions): split
+            # file-like values into `files`, scalars into `data`.
+            files_dict = {k: v for k, v in body.items() if self._is_file(v)}
             data = {k: v for k, v in body.items() if not self._is_file(v)}
             return self._client.build_request(
                 method, url, params=params, headers=headers,
-                data=data or None, files=files or None,
+                data=data or None, files=files_dict or None,
                 timeout=httpx.Timeout(timeout),
             )
         return self._client.build_request(
@@ -186,10 +199,11 @@ class SyncAPIClient(_BaseClient):
         cast_to: Any, json_body: Any = None,
         stream: bool = False, stream_cls: type | None = None,
         multipart: bool = False, binary: bool = False,
+        files: Any = None,
     ) -> Any:
         request = self._build_request(
             method, path, options, json_body,
-            multipart=multipart, binary=binary,
+            multipart=multipart, binary=binary, files=files,
         )
         last_exc: Exception | None = None
         for attempt in range(self._max_retries + 1):
@@ -233,25 +247,31 @@ class SyncAPIClient(_BaseClient):
     def _post(self, path: str, *, body: Any = None, options: RequestOptions,
               cast_to: Any, stream: bool = False,
               stream_cls: type | None = None,
-              multipart: bool = False, binary: bool = False) -> Any:
+              multipart: bool = False, binary: bool = False,
+              files: Any = None) -> Any:
         return self._request("POST", path, options=options, cast_to=cast_to,
                              json_body=body, stream=stream,
                              stream_cls=stream_cls,
-                             multipart=multipart, binary=binary)
+                             multipart=multipart, binary=binary,
+                             files=files)
 
     def _put(self, path: str, *, body: Any = None, options: RequestOptions,
              cast_to: Any,
-             multipart: bool = False, binary: bool = False) -> Any:
+             multipart: bool = False, binary: bool = False,
+              files: Any = None) -> Any:
         return self._request("PUT", path, options=options, cast_to=cast_to,
                              json_body=body,
-                             multipart=multipart, binary=binary)
+                             multipart=multipart, binary=binary,
+                             files=files)
 
     def _patch(self, path: str, *, body: Any = None, options: RequestOptions,
                cast_to: Any,
-               multipart: bool = False, binary: bool = False) -> Any:
+               multipart: bool = False, binary: bool = False,
+              files: Any = None) -> Any:
         return self._request("PATCH", path, options=options, cast_to=cast_to,
                              json_body=body,
-                             multipart=multipart, binary=binary)
+                             multipart=multipart, binary=binary,
+                             files=files)
 
     def _get_api_list(
         self, path: str, *, page: type, options: RequestOptions,
@@ -280,12 +300,13 @@ class AsyncAPIClient(_BaseClient):
         cast_to: Any, json_body: Any = None,
         stream: bool = False, stream_cls: type | None = None,
         multipart: bool = False, binary: bool = False,
+        files: Any = None,
     ) -> Any:
         import asyncio
 
         request = self._build_request(
             method, path, options, json_body,
-            multipart=multipart, binary=binary,
+            multipart=multipart, binary=binary, files=files,
         )
         last_exc: Exception | None = None
         for attempt in range(self._max_retries + 1):
@@ -331,25 +352,31 @@ class AsyncAPIClient(_BaseClient):
     async def _post(self, path: str, *, body: Any = None, options: RequestOptions,
                      cast_to: Any, stream: bool = False,
                      stream_cls: type | None = None,
-                     multipart: bool = False, binary: bool = False) -> Any:
+                     multipart: bool = False, binary: bool = False,
+              files: Any = None) -> Any:
         return await self._request("POST", path, options=options, cast_to=cast_to,
                                    json_body=body, stream=stream,
                                    stream_cls=stream_cls,
-                                   multipart=multipart, binary=binary)
+                                   multipart=multipart, binary=binary,
+                                   files=files)
 
     async def _put(self, path: str, *, body: Any = None, options: RequestOptions,
                     cast_to: Any,
-                    multipart: bool = False, binary: bool = False) -> Any:
+                    multipart: bool = False, binary: bool = False,
+              files: Any = None) -> Any:
         return await self._request("PUT", path, options=options, cast_to=cast_to,
                                    json_body=body,
-                                   multipart=multipart, binary=binary)
+                                   multipart=multipart, binary=binary,
+                                   files=files)
 
     async def _patch(self, path: str, *, body: Any = None, options: RequestOptions,
                       cast_to: Any,
-                      multipart: bool = False, binary: bool = False) -> Any:
+                      multipart: bool = False, binary: bool = False,
+              files: Any = None) -> Any:
         return await self._request("PATCH", path, options=options, cast_to=cast_to,
                                    json_body=body,
-                                   multipart=multipart, binary=binary)
+                                   multipart=multipart, binary=binary,
+                                   files=files)
 
     async def _get_api_list(
         self, path: str, *, page: type, options: RequestOptions,
