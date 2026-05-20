@@ -102,15 +102,11 @@ def _has_npm() -> bool:
     return shutil.which("npm") is not None and shutil.which("node") is not None
 
 
-@pytest.mark.skipif(not _has_npm(), reason="npm/node not available")
-def test_generated_sdk_tsc_clean(tmp_path):
-    """The whole package type-checks cleanly under TS strict mode. This
-    is the actual quality bar for the slice."""
-    root = _gen(tmp_path)
-    # Install TypeScript locally for this check.
+def _tsc_clean(root: Path) -> None:
+    """Install TypeScript locally and `tsc --noEmit` the generated SDK.
+    Raises an assertion error if tsc reports any diagnostics."""
     subprocess.run(
-        ["npm", "init", "-y"], cwd=root, check=True,
-        capture_output=True,
+        ["npm", "init", "-y"], cwd=root, check=True, capture_output=True,
     )
     subprocess.run(
         ["npm", "install", "--save-dev", "--no-audit", "--no-fund",
@@ -124,3 +120,27 @@ def test_generated_sdk_tsc_clean(tmp_path):
     assert result.returncode == 0, (
         f"tsc reported errors:\n{result.stdout}\n{result.stderr}"
     )
+
+
+@pytest.mark.skipif(not _has_npm(), reason="npm/node not available")
+def test_generated_sdk_tsc_clean(tmp_path):
+    """OneBusAway → tsc-clean TS. This is the actual quality bar for
+    the v0.1 slice."""
+    _tsc_clean(_gen(tmp_path))
+
+
+@pytest.mark.skipif(not _has_npm(), reason="npm/node not available")
+def test_chat_fixture_tsc_clean(tmp_path):
+    """The chat fixture exercises `oneOf` discriminated unions (events)
+    and JSON request bodies — broader than OneBusAway's read-only GETs.
+    Same emitter must handle it tsc-cleanly."""
+    api = build_ir(
+        load_spec(str(
+            Path(__file__).parent / "fixtures" / "chat" / "openapi.yml"
+        )),
+        load_config(str(
+            Path(__file__).parent / "fixtures" / "chat" / "stainless-config.yml"
+        )),
+    )
+    emit_ts(api, str(tmp_path))
+    _tsc_clean(tmp_path / "chat")
