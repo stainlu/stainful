@@ -1,0 +1,54 @@
+organization:
+  name: openai
+
+# v1 vertical slice: chat.completions only — exercises POST + streaming (SSE)
+# + cursor pagination + path params + nested subresource. Iteratively
+# expand from here.
+
+resources:
+  chat:
+    subresources:
+      completions:
+        methods:
+          create:
+            endpoint: "post /chat/completions"
+            streaming:
+              type: sse
+              # stream_event_model picks a component schema for the SSE event
+              stream_event_model: CreateChatCompletionStreamResponse
+              param_discriminator: stream
+          retrieve:
+            endpoint: "get /chat/completions/{completion_id}"
+          update:
+            endpoint: "post /chat/completions/{completion_id}"
+          list:
+            endpoint: "get /chat/completions"
+            paginated: true
+          delete:
+            endpoint: "delete /chat/completions/{completion_id}"
+        subresources:
+          messages:
+            methods:
+              list:
+                endpoint: "get /chat/completions/{completion_id}/messages"
+                paginated: true
+
+pagination:
+  # OpenAI/Stainless `SyncCursorPage` — `?after=<last_id>`, response has
+  # `data`, `has_more`, items each have `id`. (See
+  # tests/oracles/openai-python/.../pagination.py:SyncCursorPage.)
+  - name: cursor_page
+    type: cursor
+    request:
+      after: { type: string }
+      limit: { type: integer }
+    response:
+      data: { type: array }
+      has_more: { type: boolean }
+
+targets:
+  python:
+    package_name: openai
+
+environments:
+  production: https://api.openai.com/v1

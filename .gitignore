@@ -39,3 +39,4 @@ examples/*/sdk/uv.lock
 *.swp
 *.swo
 *~
+examples/openai/sdk/

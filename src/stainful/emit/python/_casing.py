@@ -83,6 +83,20 @@ def singularize(word: str) -> str:
 
 
 
+# Compound brand names that bake an initialism into one lowercase token —
+# real Stainless `custom_casings` territory. We don't ship custom_casings
+# (v1.1 backlog), so the well-known compounds are hardcoded here. Heuristic
+# auto-splitting on initialism suffixes would over-match real English words
+# (`chai`, `tai`, `media` → `MediA`, ...), which is exactly why Stainless
+# requires the user to declare these explicitly.
+_COMPOUND_BRANDS = {
+    "openai": "OpenAI",
+    "openapi": "OpenAPI",
+    "anthropic": "Anthropic",
+    "cloudflare": "Cloudflare",
+}
+
+
 def brand(api_name: str) -> str:
     """`onebusaway-sdk` -> `OnebusawaySDK` (matches the real Stainless output).
 
@@ -95,8 +109,13 @@ def brand(api_name: str) -> str:
     for tok in tokens:
         if not tok:
             continue
-        out.append(tok.upper() if tok.lower() in _INITIALISMS
-                   else tok[:1].upper() + tok[1:])
+        low = tok.lower()
+        if low in _COMPOUND_BRANDS:
+            out.append(_COMPOUND_BRANDS[low])         # openai -> OpenAI
+        elif low in _INITIALISMS:
+            out.append(tok.upper())
+        else:
+            out.append(tok[:1].upper() + tok[1:])
     return "".join(out)
 
 
