@@ -5,6 +5,112 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.3.0] — 2026-05-20
+
+**Nine fixes surfaced by generating a working SDK from the real
+`openai-openapi` spec (162 paths, 983 schemas) — each oracle-verified
+against the actual Stainless-generated `openai-python` SDK.** Plus the
+**nested resource directory layout** that matches `openai-python`'s
+structure (`resources/chat/completions/messages.py` etc.) — drop-in
+import paths.
+
+### Fixed
+
+- **Silent leaf-name collision (correctness bug).** With the previous
+  flat `resources/*.py` layout, two subresources sharing a leaf name
+  (e.g. `chat.completions.messages` AND `threads.messages`) wrote to
+  the same file; last-wins meant `c.chat.completions.messages.list()`
+  would silently call `/threads/{thread_id}/messages` (wrong
+  endpoint). Now: nested directories matching `openai-python`
+  (`resources/chat/completions/messages.py`,
+  `resources/threads/messages.py`). Cross-cutting imports inside
+  resource files switched from `..` to absolute `<pkg>._core.X` so the
+  same template works at any depth. New regression test
+  (`test_subresource_with_shared_leaf_name_calls_right_endpoint`).
+- **Discriminated union with an `Any` variant** (real openai spec
+  pattern: `oneOf: [{type:object, properties:{type,...}}, {}]` where
+  the empty branch lowers to `AnyType`). Pydantic rejects `object` as
+  a discriminated-union variant at import time. Now: drop the AnyType
+  variants from a discriminated union before applying the
+  discriminator.
+- **Field-name shadows Python builtin used as a type annotation.**
+  Real example: `ConversationResource` has
+  `object: Literal['conversation']` AND `metadata: object`. Mypy's
+  class-scope name resolution finds the field, not the builtin →
+  error. Now: when a field is named after a Python builtin AND that
+  name is used as a type annotation by another field, the
+  builtin-named field is reordered to come AFTER any such use (within
+  the same required-vs-optional cohort, so pydantic field ordering
+  stays valid). Oracle: `openai-python`'s `Conversation` lays out
+  `id, metadata, object, ...` for exactly this reason.
+- **`allOf` merger was too strict at spec scale.** Rejected
+  real-world `allOf` branches that differed only in (a) cosmetic
+  fields (description / title / example), (b) `$ref` vs inlined-same-
+  schema, (c) enum membership where Stainless takes the union
+  (oracle: `openai-python` emits `Literal["completed", "incomplete",
+  "failed", "in_progress"]` — the union of two branches), or (d) a
+  `T-or-null` vs `T` lattice (oracle: `openai-python` emits
+  `Optional[int]` when one branch is nullable and the other isn't).
+  Now: cosmetic-strip + one-hop `$ref` resolve + enum-union +
+  nullable-lattice; remaining structural divergence falls through to
+  lenient last-wins. Honest trade-off: strict raise was right for
+  in-repo fixtures, wrong at real-spec scale.
+- **`cast_to: type | None` was too narrow.** The
+  `Annotated[Union[V0, V1], Field(discriminator="task")]` shape for a
+  discriminated-union response (real example: openai
+  `audio.transcriptions.create`) failed mypy AND silently fell
+  through to raw dict at runtime. Now: signature widened to `Any`;
+  `_process_response_data` switched to a TypeAdapter-first pattern
+  (try `pydantic.TypeAdapter(cast_to)`, fall back to raw data only on
+  `PydanticSchemaGenerationError`) — passes mypy, validates discriminated
+  unions, and `bytes` / `None` short-circuits still work.
+
+### Added
+
+- **Real-world test:** `examples/openai/` — the public Stainless-
+  processed `openai-openapi` spec (162 paths, 983 schemas, OpenAPI
+  3.1) + a hand-written `stainless.yml` covering ~22 resources (chat,
+  embeddings, files, audio, fine_tuning, models, moderations, images,
+  batches, assistants, uploads, vector_stores, conversations,
+  threads, …). Generates a **mypy-clean 172-file SDK** that exercises
+  every capability stainful supports: streaming, JSON, multipart,
+  binary download, raw binary upload, cursor pagination,
+  discriminated-union responses, nested subresources, webhook unwrap.
+  Generated SDK is gitignored; spec committed (content-pinned via the
+  Stainless CDN SHA in the source URL).
+- **Pydantic-reserved field-name mangling.** Field names that clash
+  with `pydantic.BaseModel` attributes (`schema`, `copy`, `dict`,
+  `json`, `model_dump`, ...) are now mangled to `<name>_` and aliased
+  via `Field(alias="<wire>")` — same pattern as the existing
+  Python-keyword mangle. Oracle: `openai-python` emits
+  `schema_: Optional[Dict[str, object]] = FieldInfo(alias="schema",
+  default=None)`.
+- **Compound brand name override.** `openai` → `OpenAI` (not
+  `Openai`), `openapi` → `OpenAPI`, `anthropic` → `Anthropic`,
+  `cloudflare` → `Cloudflare`. Hardcoded table (no risky auto-split
+  on initialism suffixes — would over-match real words like `chai`,
+  `tai`). Stainless's `custom_casings` block is the long-term answer
+  (v1.1 backlog).
+- **Adoption polish.** New
+  [`docs/migrating-from-stainless.md`](docs/migrating-from-stainless.md):
+  step-by-step migration guide for Stainless customers (after the
+  Anthropic acquisition wind-down), exhaustive symbol-compat table,
+  honest gap list with workarounds. README leads with a migration
+  callout; OpenAI proof point in the Status section. Quickstart
+  trimmed to the essential install + generate; contributor commands
+  moved out of the user flow.
+
+### Verified
+
+- **84 tests green** (was 77 at v0.2.0; 7 new regression tests for
+  the cross-spec bugs).
+- **mypy 0 on 250 combined source files** (172 generated openai SDK +
+  92 dogfood + 9 emitter).
+- **Drop-in import parity:** `from openai.resources.chat.completions
+  import CompletionsResource` resolves against stainful's output.
+- **No regressions on the OneBusAway dogfood:** 29/29 of Stainless's
+  own test files still import unchanged.
+
 ## [0.2.0] — 2026-05-20
 
 **Seven product-quality fixes verified vs the real Stainless SDKs (openai-
