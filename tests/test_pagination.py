@@ -63,7 +63,9 @@ def test_list_returns_a_page_type(pag):
     src = (out / "paginated" / "resources" / "things.py").read_text()
     assert "_get_api_list(" in src
     assert "SyncCursorPage[" in src and "AsyncCursorPage[" in src
-    assert "from .._core.pagination import" in src
+    # Absolute import (depth-agnostic) since resource files now live at
+    # variable depths under resources/.
+    assert "from paginated._core.pagination import" in src
 
 
 def test_sync_auto_pagination_walks_all_pages(pag):

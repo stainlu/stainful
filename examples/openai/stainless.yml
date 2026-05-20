@@ -104,6 +104,149 @@ resources:
       delete:
         endpoint: "delete /models/{model}"
 
+  # Legacy /completions endpoint deliberately omitted: it would collide
+  # with chat.completions on emitted file/class name in the current FLAT
+  # resources/ layout. Adding it requires the nested-resources refactor
+  # (resources/chat/completions/completions.py, openai-python-shaped) —
+  # tracked separately. The /chat/completions endpoint above already
+  # exercises the streaming-POST shape, so no capability coverage lost.
+
+  moderations:                   # single endpoint
+    methods:
+      create:
+        endpoint: "post /moderations"
+
+  images:
+    methods:
+      generate:                  # JSON in
+        endpoint: "post /images/generations"
+        streaming:
+          type: sse
+          stream_event_model: ImageGenStreamEvent
+          param_discriminator: stream
+      edit:                      # multipart in
+        endpoint: "post /images/edits"
+
+  batches:
+    methods:
+      create:
+        endpoint: "post /batches"
+      list:
+        endpoint: "get /batches"
+        paginated: true
+      retrieve:
+        endpoint: "get /batches/{batch_id}"
+      cancel:
+        endpoint: "post /batches/{batch_id}/cancel"
+
+  assistants:
+    methods:
+      create:
+        endpoint: "post /assistants"
+      list:
+        endpoint: "get /assistants"
+        paginated: true
+      retrieve:
+        endpoint: "get /assistants/{assistant_id}"
+      update:
+        endpoint: "post /assistants/{assistant_id}"
+      delete:
+        endpoint: "delete /assistants/{assistant_id}"
+
+  uploads:                       # POST-only multi-step upload protocol
+    methods:
+      create:
+        endpoint: "post /uploads"
+      cancel:
+        endpoint: "post /uploads/{upload_id}/cancel"
+      complete:
+        endpoint: "post /uploads/{upload_id}/complete"
+      add_part:
+        endpoint: "post /uploads/{upload_id}/parts"
+
+  vector_stores:                 # nested file_batches subresource
+    methods:
+      create:
+        endpoint: "post /vector_stores"
+      list:
+        endpoint: "get /vector_stores"
+        paginated: true
+      retrieve:
+        endpoint: "get /vector_stores/{vector_store_id}"
+      update:
+        endpoint: "post /vector_stores/{vector_store_id}"
+      delete:
+        endpoint: "delete /vector_stores/{vector_store_id}"
+    subresources:
+      file_batches:
+        methods:
+          create:
+            endpoint: "post /vector_stores/{vector_store_id}/file_batches"
+          retrieve:
+            endpoint: "get /vector_stores/{vector_store_id}/file_batches/{batch_id}"
+          cancel:
+            endpoint: "post /vector_stores/{vector_store_id}/file_batches/{batch_id}/cancel"
+          list_files:
+            endpoint: "get /vector_stores/{vector_store_id}/file_batches/{batch_id}/files"
+            paginated: true
+
+  conversations:                 # nested items subresource
+    methods:
+      create:
+        endpoint: "post /conversations"
+      retrieve:
+        endpoint: "get /conversations/{conversation_id}"
+      update:
+        endpoint: "post /conversations/{conversation_id}"
+      delete:
+        endpoint: "delete /conversations/{conversation_id}"
+    subresources:
+      items:
+        methods:
+          list:
+            endpoint: "get /conversations/{conversation_id}/items"
+            paginated: true
+          create:
+            endpoint: "post /conversations/{conversation_id}/items"
+          retrieve:
+            endpoint: "get /conversations/{conversation_id}/items/{item_id}"
+          delete:
+            endpoint: "delete /conversations/{conversation_id}/items/{item_id}"
+
+  threads:                       # assistants-API messages + runs subresources
+    methods:
+      create:
+        endpoint: "post /threads"
+      retrieve:
+        endpoint: "get /threads/{thread_id}"
+      update:
+        endpoint: "post /threads/{thread_id}"
+      delete:
+        endpoint: "delete /threads/{thread_id}"
+      create_and_run:
+        endpoint: "post /threads/runs"
+    subresources:
+      messages:
+        methods:
+          list:
+            endpoint: "get /threads/{thread_id}/messages"
+            paginated: true
+          create:
+            endpoint: "post /threads/{thread_id}/messages"
+          retrieve:
+            endpoint: "get /threads/{thread_id}/messages/{message_id}"
+          update:
+            endpoint: "post /threads/{thread_id}/messages/{message_id}"
+          delete:
+            endpoint: "delete /threads/{thread_id}/messages/{message_id}"
+      runs:
+        methods:
+          list:
+            endpoint: "get /threads/{thread_id}/runs"
+            paginated: true
+          create:
+            endpoint: "post /threads/{thread_id}/runs"
+
 pagination:
   # OpenAI/Stainless `SyncCursorPage` — `?after=<last_id>`, response has
   # `data`, `has_more`, items each have `id`. (See

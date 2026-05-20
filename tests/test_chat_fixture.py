@@ -124,7 +124,10 @@ def test_sse_streaming_sync_and_async(chat_sdk):
 
 def test_streaming_overloads_present_in_source(chat_sdk):
     out, _ = chat_sdk
-    src = (out / "chat" / "resources" / "completions.py").read_text()
+    # Nested layout: `chat` has a `completions` subresource, so chat is
+    # a subpackage and completions sits at `resources/chat/completions.py`
+    # (chat itself lives at `resources/chat/chat.py`).
+    src = (out / "chat" / "resources" / "chat" / "completions.py").read_text()
     assert src.count("@overload") >= 2          # stream False/True overloads
     assert "Stream[CompletionCreateEvent]" in src  # typed event stream return
     assert 'Field(discriminator="type")' not in src  # union lives in types/

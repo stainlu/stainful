@@ -84,6 +84,23 @@ def test_chat_completions_resource_tree(oa):
     assert hasattr(c.chat.completions.messages, "list")
 
 
+def test_subresource_with_shared_leaf_name_calls_right_endpoint(oa):
+    """`chat.completions.messages` and `threads.messages` share the LEAF
+    name `messages` but must NOT collide on the emitted file/class —
+    otherwise calling `c.chat.completions.messages.list(...)` would hit
+    `/threads/.../messages` (silent wrong-endpoint bug). Inspect the
+    method source to confirm the right path is baked in."""
+    import inspect
+    _, oai = oa
+    c = oai.OpenAI(api_key="sk-test")
+    chat_list_src = inspect.getsource(c.chat.completions.messages.list)
+    assert "/chat/completions/" in chat_list_src
+    threads_list_src = inspect.getsource(c.threads.messages.list)
+    assert "/threads/" in threads_list_src
+    # both must NOT be the same method (the wrong-endpoint case)
+    assert chat_list_src != threads_list_src
+
+
 def test_create_has_streaming_overload(oa):
     _, oai = oa
     c = oai.OpenAI(api_key="sk-test")

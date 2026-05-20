@@ -8,17 +8,17 @@ from typing import Literal
 
 import httpx
 
-from .._core._request_options import make_request_options
-from .._core._resource import AsyncAPIResource, SyncAPIResource
-from .._core._response import (
+from onebusaway._core._request_options import make_request_options
+from onebusaway._core._resource import AsyncAPIResource, SyncAPIResource
+from onebusaway._core._response import (
     async_to_raw_response_wrapper,
     async_to_streamed_response_wrapper,
     to_raw_response_wrapper,
     to_streamed_response_wrapper,
 )
-from .._core._sentinels import NotGiven, not_given
-from .._core._types import Body, FileTypes, Headers, Query  # noqa: F401
-from ..types import ResponseWrapper
+from onebusaway._core._sentinels import NotGiven, not_given
+from onebusaway._core._types import Body, FileTypes, Headers, Query  # noqa: F401
+from onebusaway.types import ResponseWrapper
 
 __all__ = ["ReportProblemWithStopResource", "AsyncReportProblemWithStopResource"]
 
