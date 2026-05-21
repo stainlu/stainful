@@ -205,11 +205,17 @@ class _TSEmitter:
             "import { Stream } from '../_core/streaming';\n"
             if any(m.streaming is not None for m in r.methods) else ""
         )
+        # Import CursorPage when any of this resource's methods paginate.
+        pagination_import = (
+            "import { CursorPage } from '../_core/pagination';\n"
+            if any(m.pagination is not None for m in r.methods) else ""
+        )
         return (
             _HEADER
             + "import { APIResource } from '../_core/resource';\n"
             + "import type { BaseClient, RequestOptions } from '../_core/client';\n"
             + stream_import
+            + pagination_import
             + types_import
             + sub_imports
             + "\n"
@@ -333,12 +339,30 @@ class _TSEmitter:
             signature_args = ", ".join(filter(None, [
                 path_arg_decls, params_decl, "options?: Partial<RequestOptions>",
             ]))
+            pagination_arg = ""
+            if m.pagination is not None:
+                cfg_parts: list[str] = []
+                if m.pagination.cursor_param:
+                    cfg_parts.append(
+                        f"cursorParam: '{m.pagination.cursor_param}'"
+                    )
+                else:
+                    # Match the Python runtime's default — `after`.
+                    cfg_parts.append("cursorParam: 'after'")
+                if m.pagination.cursor_response_field:
+                    cfg_parts.append(
+                        f"cursorResponseField: "
+                        f"'{m.pagination.cursor_response_field}'"
+                    )
+                pagination_arg = (
+                    f"\n      pagination: {{ {', '.join(cfg_parts)} }},"
+                )
             method_body = (
                 f"  {camel_method(m.name)}({signature_args}): Promise<{ret_type}> {{\n"
                 f"    return this._client.request<{ret_type}>({{\n"
                 f"      method: '{verb}',\n"
                 f"      path: `{path}`,"
-                f"{query_arg}{body_arg}\n"
+                f"{query_arg}{body_arg}{pagination_arg}\n"
                 f"      ...(options ?? {{}}),\n"
                 f"    }});\n"
                 f"  }}"
@@ -346,6 +370,11 @@ class _TSEmitter:
         return interface_block, method_body
 
     def _method_return(self, m: Method, resource_name: str) -> str:
+        # Paginated → `CursorPage<Item>`. The runtime wraps the parsed
+        # response body when `RequestOptions.pagination` is set.
+        if m.pagination is not None:
+            item = self._page_item_type(m, resource_name)
+            return f"CursorPage<{item}>"
         for status in ("200", "201", "2XX", "default"):
             if status in m.responses:
                 t = m.responses[status]
@@ -356,6 +385,22 @@ class _TSEmitter:
                     return name
                 return self._render_type(t)
         return "void"
+
+    def _page_item_type(self, m: Method, resource_name: str) -> str:
+        """Find the `data: List[T]` element type on the 200 response;
+        render `T` as the page-item type. Fall back to `unknown` if the
+        shape doesn't match."""
+        for status in ("200", "201", "2XX"):
+            if status not in m.responses:
+                continue
+            t = m.responses[status]
+            obj = self._resolve_object(t) if isinstance(t, (ObjectType, ModelRef)) else None
+            if obj is None:
+                continue
+            for p in obj.properties:
+                if p.name == "data" and isinstance(p.type, ArrayType):
+                    return self._render_type(p.type.item)
+        return "unknown"
 
     # ----- type rendering --------------------------------------------------
     def _render_type(self, t: Type) -> str:
@@ -473,10 +518,24 @@ class _TSEmitter:
             return False
         return walk(self.api.root.subresources)
 
+    def _has_pagination(self) -> bool:
+        def walk(rs: list[Resource]) -> bool:
+            for r in rs:
+                if any(m.pagination is not None for m in r.methods):
+                    return True
+                if walk(r.subresources):
+                    return True
+            return False
+        return walk(self.api.root.subresources)
+
     def _index_src(self) -> str:
         stream_export = (
             "export { Stream } from './_core/streaming';\n"
             if self._has_streaming() else ""
+        )
+        pagination_export = (
+            "export { CursorPage } from './_core/pagination';\n"
+            if self._has_pagination() else ""
         )
         return (
             _HEADER
@@ -484,6 +543,7 @@ class _TSEmitter:
             + f"export {{ {self.brand} as default }} from './client';\n"
             + "export type { ClientOptions } from './_core/client';\n"
             + stream_export
+            + pagination_export
             + "export {\n"
             + "  APIConnectionError,\n"
             + "  APIError,\n"

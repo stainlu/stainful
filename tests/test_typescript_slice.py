@@ -279,6 +279,87 @@ const sdk = require('./dist/index.js');
 """
 
 
+_PAGINATION_SMOKE_JS = r"""
+// Pagination runtime smoke — verify CursorPage walks pages via
+// `for await`, sending the configured cursor wire param.
+const assert = require('node:assert');
+const sdk = require('./dist/index.js');
+
+(async () => {
+  const seen = [];
+  const fetchMock = async (url, init) => {
+    seen.push({ url: String(url), method: init?.method });
+    const u = new URL(String(url));
+    const cursor = u.searchParams.get('cursor');
+    if (!cursor) {
+      return new Response(
+        JSON.stringify({
+          data: [{ id: '1', name: 'a' }, { id: '2', name: 'b' }],
+          has_more: true,
+          next_cursor: 'c2',
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      );
+    }
+    return new Response(
+      JSON.stringify({
+        data: [{ id: '3', name: 'c' }],
+        has_more: false,
+        next_cursor: null,
+      }),
+      { status: 200, headers: { 'content-type': 'application/json' } },
+    );
+  };
+
+  const c = new sdk.PaginatedSDK({ apiKey: 'k', fetch: fetchMock });
+  const page = await c.things.list({});
+  assert(page instanceof sdk.CursorPage,
+         `expected CursorPage, got ${page.constructor.name}`);
+
+  const ids = [];
+  for await (const item of page) ids.push(item.id);
+  assert.deepStrictEqual(ids, ['1', '2', '3'], `got ${JSON.stringify(ids)}`);
+  assert.strictEqual(seen.length, 2, `expected 2 page fetches; got ${seen.length}`);
+  assert(seen[1].url.includes('cursor=c2'),
+         `second-page request should carry cursor=c2; got ${seen[1].url}`);
+  console.log('pagination smoke OK: walked 2 pages, 3 items');
+})();
+"""
+
+
+@pytest.mark.skipif(not _has_npm(), reason="npm/node not available")
+def test_runtime_pagination_smoke(tmp_path):
+    """A `paginated: true` method returns a `CursorPage<Item>`. `for await`
+    walks every page transparently, sending the configured cursor wire
+    param on each subsequent request."""
+    api = build_ir(
+        load_spec(str(
+            Path(__file__).parent / "fixtures" / "paginated" / "openapi.yml"
+        )),
+        load_config(str(
+            Path(__file__).parent / "fixtures" / "paginated" / "stainless.yml"
+        )),
+    )
+    emit_ts(api, str(tmp_path))
+    root = tmp_path / "paginated"
+    subprocess.run(["npm", "init", "-y"], cwd=root, check=True,
+                   capture_output=True)
+    subprocess.run(
+        ["npm", "install", "--save-dev", "--no-audit", "--no-fund",
+         "--silent", "typescript@5.6"],
+        cwd=root, check=True, capture_output=True,
+    )
+    tsc = subprocess.run(["npx", "tsc"], cwd=root, capture_output=True, text=True)
+    assert tsc.returncode == 0, f"tsc failed:\n{tsc.stdout}\n{tsc.stderr}"
+    (root / "smoke.js").write_text(_PAGINATION_SMOKE_JS)
+    node = subprocess.run(
+        ["node", "smoke.js"], cwd=root, capture_output=True, text=True,
+    )
+    assert node.returncode == 0, (
+        f"pagination smoke failed:\n{node.stdout}\n{node.stderr}"
+    )
+
+
 @pytest.mark.skipif(not _has_npm(), reason="npm/node not available")
 def test_runtime_streaming_smoke(tmp_path):
     """A `streaming:` method emits with TS overloads; calling with

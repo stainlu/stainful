@@ -13,6 +13,7 @@ import {
   statusErrorFor,
 } from './error';
 import { Stream } from './streaming';
+import { CursorPage, type PaginationConfig, type PagedResponseBody } from './pagination';
 
 export type Headers = Record<string, string>;
 export type Query = Record<string, string | number | boolean | undefined | null>;
@@ -30,6 +31,9 @@ export interface RequestOptions {
   /** When true, returns a `Stream<T>` over the response body (SSE)
    *  instead of parsing the JSON body. */
   stream?: boolean;
+  /** When set, wraps the parsed JSON in a `CursorPage<Item>` that
+   *  walks pages on demand via `Symbol.asyncIterator`. */
+  pagination?: PaginationConfig;
 }
 
 export interface ClientOptions {
@@ -136,6 +140,12 @@ export abstract class BaseClient {
           const text = await resp.text();
           if (!text) return undefined as T;
           const data = JSON.parse(text);
+          if (opts.pagination) {
+            return new CursorPage(
+              this, opts.path, opts.pagination,
+              data as PagedResponseBody<unknown>,
+            ) as unknown as T;
+          }
           return this.processResponseData<T>(data, resp);
         }
         if (attempt < this._maxRetries && this.shouldRetry(resp.status)) {

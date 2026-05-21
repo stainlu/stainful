@@ -10,6 +10,7 @@ export type {
 } from './client';
 export { APIResource } from './resource';
 export { Stream } from './streaming';
+export { CursorPage, type PaginationConfig } from './pagination';
 export {
   APIConnectionError,
   APIError,
