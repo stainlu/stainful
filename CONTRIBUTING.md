@@ -3,6 +3,11 @@
 Thanks for helping build the open-source Stainless. This project values
 **deep modules, clean interfaces, and honest scope**.
 
+> **Closing a parity gap with a real Stainless SDK?** Read
+> [`docs/CONTRIBUTING-CODEGEN.md`](docs/CONTRIBUTING-CODEGEN.md) first —
+> it's the deeper guide for the part most contributions actually touch
+> (fixture pattern, oracle harness, worked example end-to-end).
+
 ## Setup
 
 ```bash
