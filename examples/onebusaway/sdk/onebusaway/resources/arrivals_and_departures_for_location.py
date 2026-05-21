@@ -50,7 +50,7 @@ class ArrivalsAndDeparturesForLocationResource(SyncAPIResource):
         extra_body: Body | None = None,
         timeout: float | httpx.Timeout | None | NotGiven = not_given,
     ) -> ArrivalsAndDeparturesForLocationListResponse:
-        """arrivals-and-departures-for-location"""
+        """Returns real-time arrival and departure data for stops within a bounding box or radius centered on a specific location."""
         _params = {
             "lat": lat,
             "lon": lon,
@@ -106,7 +106,7 @@ class AsyncArrivalsAndDeparturesForLocationResource(AsyncAPIResource):
         extra_body: Body | None = None,
         timeout: float | httpx.Timeout | None | NotGiven = not_given,
     ) -> ArrivalsAndDeparturesForLocationListResponse:
-        """arrivals-and-departures-for-location"""
+        """Returns real-time arrival and departure data for stops within a bounding box or radius centered on a specific location."""
         _params = {
             "lat": lat,
             "lon": lon,

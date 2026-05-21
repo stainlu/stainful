@@ -30,6 +30,7 @@ from stainful.ir.types import (
     AnyType,
     ArrayType,
     ModelRef,
+    ObjectType,
     PrimitiveKind,
     PrimitiveType,
     Type,
@@ -99,6 +100,19 @@ class _DocsEmitter:
         # the nested layout the Python emitter writes).
         resource_path = self._resource_file_path(r, parent_path)
         out: list[str] = [f"{hashes} {heading}", ""]
+        # Types block — list named models the resource's methods reference
+        # (matches openai-python's api.md format). Only emit when there's
+        # something to import.
+        types = self._collect_resource_types(r, access_chain)
+        if types:
+            out += [
+                "Types:",
+                "",
+                "```python",
+                f"from {self.pkg}.types import {', '.join(types)}",
+                "```",
+                "",
+            ]
         if r.methods:
             out.append("Methods:")
             out.append("")
@@ -117,6 +131,36 @@ class _DocsEmitter:
                 chain=access_chain,
             )
         return out
+
+    def _collect_resource_types(
+        self, r: Resource, access_chain: tuple[str, ...],
+    ) -> list[str]:
+        """Walk each method's return/body/params types; collect the
+        ModelRef names that appear in the public surface so they can be
+        imported in a per-resource Types: block (openai-python style).
+        Inline ObjectType responses use the path-named class — also
+        included. Sorted + deduped.
+        """
+        out: set[str] = set()
+        for m in r.methods:
+            for status in ("200", "201", "2XX", "default"):
+                if status in m.responses:
+                    t = m.responses[status]
+                    if isinstance(t, ModelRef):
+                        out.add(pascal(t.name))
+                    elif isinstance(t, ObjectType):
+                        out.add(
+                            f"{pascal_singular_last(access_chain[-1])}"
+                            f"{pascal(m.name)}Response"
+                        )
+                    break
+            if m.body is not None:
+                # Body params class
+                out.add(
+                    f"{pascal_singular_last(access_chain[-1])}"
+                    f"{pascal(m.name)}Params"
+                )
+        return sorted(out)
 
     # ----- per-method line --------------------------------------------------
     def _method_line(

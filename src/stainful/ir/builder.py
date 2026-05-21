@@ -463,6 +463,10 @@ class _Builder:
             if loc in by_loc:
                 by_loc[loc].append(self._param(p))
         verb = HTTPVerb(mc.endpoint.verb)
+        # Prefer the operation's `description` (long-form) but fall back
+        # to `summary` if only that is set. Used by the docs emitter to
+        # show what each method actually does.
+        op_docs = op.raw.get("description") or op.raw.get("summary")
         return Method(
             name=mc.name,
             http_verb=verb,
@@ -476,6 +480,7 @@ class _Builder:
             pagination=self._pagination(mc),
             streaming=self._streaming(mc),
             idempotent=verb in (HTTPVerb.GET, HTTPVerb.PUT, HTTPVerb.DELETE),
+            docs=op_docs.strip() if isinstance(op_docs, str) else None,
             emit_hints={
                 k: v
                 for k, v in {
@@ -486,7 +491,6 @@ class _Builder:
                 }.items()
                 if v
             },
-            docs=op.summary,
         )
 
     def _resource(self, name: str, rc: ResourceConfig) -> Resource:

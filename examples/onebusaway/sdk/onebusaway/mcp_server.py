@@ -76,7 +76,7 @@ async def list_tools() -> list[Tool]:
     ),
     Tool(
         name='agency_retrieve',
-        description='Retrieve info for a specific transit agency identified by ID',
+        description='Retrieve information for a specific transit agency identified by its unique ID.',
         inputSchema={
                 "properties": {
                         "agency_id": {
@@ -255,7 +255,7 @@ async def list_tools() -> list[Tool]:
     ),
     Tool(
         name='route_retrieve',
-        description='Retrieve info for a specific route identified by ID',
+        description='Retrieve information for a specific route identified by its unique ID.',
         inputSchema={
                 "properties": {
                         "route_id": {
@@ -355,7 +355,7 @@ async def list_tools() -> list[Tool]:
     ),
     Tool(
         name='arrivals_and_departures_for_location_list',
-        description='arrivals-and-departures-for-location',
+        description='Returns real-time arrival and departure data for stops within a bounding box or radius centered on a specific location.',
         inputSchema={
                 "properties": {
                         "empty_returns_not_found": {
@@ -788,7 +788,7 @@ async def list_tools() -> list[Tool]:
     ),
     Tool(
         name='shape_retrieve',
-        description='Retrieve a shape by ID',
+        description='Retrieve a shape (the path traveled by a transit vehicle) by ID.',
         inputSchema={
                 "properties": {
                         "shape_id": {

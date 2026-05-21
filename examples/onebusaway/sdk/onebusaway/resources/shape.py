@@ -40,7 +40,7 @@ class ShapeResource(SyncAPIResource):
         extra_body: Body | None = None,
         timeout: float | httpx.Timeout | None | NotGiven = not_given,
     ) -> ShapeRetrieveResponse:
-        """Retrieve a shape by ID"""
+        """Retrieve a shape (the path traveled by a transit vehicle) by ID."""
         if not shape_id:
             raise ValueError(
                 f"Expected a non-empty value for `shape_id` but received {shape_id!r}"
@@ -75,7 +75,7 @@ class AsyncShapeResource(AsyncAPIResource):
         extra_body: Body | None = None,
         timeout: float | httpx.Timeout | None | NotGiven = not_given,
     ) -> ShapeRetrieveResponse:
-        """Retrieve a shape by ID"""
+        """Retrieve a shape (the path traveled by a transit vehicle) by ID."""
         if not shape_id:
             raise ValueError(
                 f"Expected a non-empty value for `shape_id` but received {shape_id!r}"

@@ -40,7 +40,7 @@ class AgencyResource(SyncAPIResource):
         extra_body: Body | None = None,
         timeout: float | httpx.Timeout | None | NotGiven = not_given,
     ) -> AgencyRetrieveResponse:
-        """Retrieve info for a specific transit agency identified by ID"""
+        """Retrieve information for a specific transit agency identified by its unique ID."""
         if not agency_id:
             raise ValueError(
                 f"Expected a non-empty value for `agency_id` but received {agency_id!r}"
@@ -75,7 +75,7 @@ class AsyncAgencyResource(AsyncAPIResource):
         extra_body: Body | None = None,
         timeout: float | httpx.Timeout | None | NotGiven = not_given,
     ) -> AgencyRetrieveResponse:
-        """Retrieve info for a specific transit agency identified by ID"""
+        """Retrieve information for a specific transit agency identified by its unique ID."""
         if not agency_id:
             raise ValueError(
                 f"Expected a non-empty value for `agency_id` but received {agency_id!r}"

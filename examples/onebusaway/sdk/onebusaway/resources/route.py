@@ -40,7 +40,7 @@ class RouteResource(SyncAPIResource):
         extra_body: Body | None = None,
         timeout: float | httpx.Timeout | None | NotGiven = not_given,
     ) -> RouteRetrieveResponse:
-        """Retrieve info for a specific route identified by ID"""
+        """Retrieve information for a specific route identified by its unique ID."""
         if not route_id:
             raise ValueError(
                 f"Expected a non-empty value for `route_id` but received {route_id!r}"
@@ -75,7 +75,7 @@ class AsyncRouteResource(AsyncAPIResource):
         extra_body: Body | None = None,
         timeout: float | httpx.Timeout | None | NotGiven = not_given,
     ) -> RouteRetrieveResponse:
-        """Retrieve info for a specific route identified by ID"""
+        """Retrieve information for a specific route identified by its unique ID."""
         if not route_id:
             raise ValueError(
                 f"Expected a non-empty value for `route_id` but received {route_id!r}"
