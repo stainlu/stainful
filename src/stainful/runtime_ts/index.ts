@@ -9,6 +9,7 @@ export type {
   RequestOptions,
 } from './client';
 export { APIResource } from './resource';
+export { Stream } from './streaming';
 export {
   APIConnectionError,
   APIError,

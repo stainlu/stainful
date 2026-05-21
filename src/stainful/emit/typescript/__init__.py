@@ -200,10 +200,16 @@ class _TSEmitter:
             f"import type {{ {', '.join(used_types)} }} from '../types';\n"
             if used_types else ""
         )
+        # Import Stream when any of this resource's methods stream.
+        stream_import = (
+            "import { Stream } from '../_core/streaming';\n"
+            if any(m.streaming is not None for m in r.methods) else ""
+        )
         return (
             _HEADER
             + "import { APIResource } from '../_core/resource';\n"
             + "import type { BaseClient, RequestOptions } from '../_core/client';\n"
+            + stream_import
             + types_import
             + sub_imports
             + "\n"
@@ -272,19 +278,71 @@ class _TSEmitter:
             + "\n".join(param_fields)
             + "\n}\n\n"
         ) if has_params else ""
-        signature_args = ", ".join(
-            filter(None, [path_arg_decls, params_decl, "options?: Partial<RequestOptions>"])
-        )
-        method_body = (
-            f"  {camel_method(m.name)}({signature_args}): Promise<{ret_type}> {{\n"
-            f"    return this._client.request<{ret_type}>({{\n"
-            f"      method: '{verb}',\n"
-            f"      path: `{path}`,"
-            f"{query_arg}{body_arg}\n"
-            f"      ...(options ?? {{}}),\n"
-            f"    }});\n"
-            f"  }}"
-        )
+        # Streaming methods (config `streaming:` block) get two overloads:
+        # `stream: true` → `Promise<Stream<Event>>`; default → the JSON
+        # response. The impl signature is the union.
+        if m.streaming is not None:
+            event_t = self._render_type(m.streaming.event_type)
+            stream_union_ret = f"{ret_type} | Stream<{event_t}>"
+            disc = m.streaming.discriminator or "stream"
+            method_name = camel_method(m.name)
+            # Build the two narrowing overloads. If has_params, we use
+            # `Params & { stream?: false }` / `Params & { stream: true }`
+            # so callers get perfect narrowing on the call site.
+            if has_params:
+                no_stream_args = ", ".join(filter(None, [
+                    path_arg_decls,
+                    f"params: {params_type_name} & {{ {disc}?: false }}",
+                    "options?: Partial<RequestOptions>",
+                ]))
+                stream_args = ", ".join(filter(None, [
+                    path_arg_decls,
+                    f"params: {params_type_name} & {{ {disc}: true }}",
+                    "options?: Partial<RequestOptions>",
+                ]))
+            else:
+                no_stream_args = ", ".join(filter(None, [
+                    path_arg_decls,
+                    f"params: {{ {disc}?: false }}",
+                    "options?: Partial<RequestOptions>",
+                ]))
+                stream_args = ", ".join(filter(None, [
+                    path_arg_decls,
+                    f"params: {{ {disc}: true }}",
+                    "options?: Partial<RequestOptions>",
+                ]))
+            impl_args = ", ".join(filter(None, [
+                path_arg_decls,
+                params_decl or f"params: {{ {disc}?: boolean }}",
+                "options?: Partial<RequestOptions>",
+            ]))
+            method_body = (
+                f"  {method_name}({no_stream_args}): Promise<{ret_type}>;\n"
+                f"  {method_name}({stream_args}): Promise<Stream<{event_t}>>;\n"
+                f"  {method_name}({impl_args}): Promise<{stream_union_ret}> {{\n"
+                f"    return this._client.request<{stream_union_ret}>({{\n"
+                f"      method: '{verb}',\n"
+                f"      path: `{path}`,"
+                f"{query_arg}{body_arg}\n"
+                f"      stream: !!(params as {{ {disc}?: boolean }})?.{disc},\n"
+                f"      ...(options ?? {{}}),\n"
+                f"    }});\n"
+                f"  }}"
+            )
+        else:
+            signature_args = ", ".join(filter(None, [
+                path_arg_decls, params_decl, "options?: Partial<RequestOptions>",
+            ]))
+            method_body = (
+                f"  {camel_method(m.name)}({signature_args}): Promise<{ret_type}> {{\n"
+                f"    return this._client.request<{ret_type}>({{\n"
+                f"      method: '{verb}',\n"
+                f"      path: `{path}`,"
+                f"{query_arg}{body_arg}\n"
+                f"      ...(options ?? {{}}),\n"
+                f"    }});\n"
+                f"  }}"
+            )
         return interface_block, method_body
 
     def _method_return(self, m: Method, resource_name: str) -> str:
@@ -404,12 +462,28 @@ class _TSEmitter:
             + "}\n"
         )
 
+    def _has_streaming(self) -> bool:
+        """Any method in the resource tree configured for SSE streaming?"""
+        def walk(rs: list[Resource]) -> bool:
+            for r in rs:
+                if any(m.streaming is not None for m in r.methods):
+                    return True
+                if walk(r.subresources):
+                    return True
+            return False
+        return walk(self.api.root.subresources)
+
     def _index_src(self) -> str:
+        stream_export = (
+            "export { Stream } from './_core/streaming';\n"
+            if self._has_streaming() else ""
+        )
         return (
             _HEADER
             + f"export {{ {self.brand} }} from './client';\n"
             + f"export {{ {self.brand} as default }} from './client';\n"
             + "export type { ClientOptions } from './_core/client';\n"
+            + stream_export
             + "export {\n"
             + "  APIConnectionError,\n"
             + "  APIError,\n"

@@ -12,6 +12,7 @@ import {
   APIResponseValidationError,
   statusErrorFor,
 } from './error';
+import { Stream } from './streaming';
 
 export type Headers = Record<string, string>;
 export type Query = Record<string, string | number | boolean | undefined | null>;
@@ -26,6 +27,9 @@ export interface RequestOptions {
   files?: Array<[string, unknown]>;   // multipart parts (multi-content auto-detect)
   timeout?: number;                    // ms
   signal?: AbortSignal;
+  /** When true, returns a `Stream<T>` over the response body (SSE)
+   *  instead of parsing the JSON body. */
+  stream?: boolean;
 }
 
 export interface ClientOptions {
@@ -124,6 +128,11 @@ export abstract class BaseClient {
           signal: opts.signal ?? ac.signal,
         });
         if (resp.ok) {
+          if (opts.stream) {
+            // SSE — caller asked for a Stream<T>. Skip JSON parse;
+            // return the response wrapped in our Stream class.
+            return new Stream<unknown>(resp, ac) as unknown as T;
+          }
           const text = await resp.text();
           if (!text) return undefined as T;
           const data = JSON.parse(text);

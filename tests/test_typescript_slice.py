@@ -241,6 +241,78 @@ const errorResponse = (status, body) => new Response(
 """
 
 
+_STREAMING_SMOKE_JS = r"""
+// Streaming runtime smoke — verify Stream<T> yields typed events
+// from an SSE response.
+const assert = require('node:assert');
+const sdk = require('./dist/index.js');
+
+(async () => {
+  // Mock a real SSE wire: three event blocks then [DONE].
+  const sseBody =
+    `data: {"id":"c1","content":"hello"}\n\n` +
+    `data: {"id":"c2","content":" world"}\n\n` +
+    `data: {"id":"c3","content":"!"}\n\n` +
+    `data: [DONE]\n\n`;
+
+  const fetchMock = async (_url, _init) => {
+    return new Response(sseBody, {
+      status: 200,
+      headers: { 'content-type': 'text/event-stream' },
+    });
+  };
+
+  const c = new sdk.ChatSDK({ apiKey: 'k', fetch: fetchMock });
+  const stream = await c.chat.completions.create({
+    model: 'm', stream: true,
+    messages: [{ role: 'user', content: 'hi' }],
+  });
+  assert(stream instanceof sdk.Stream, `expected Stream, got ${stream.constructor.name}`);
+
+  const ids = [];
+  for await (const evt of stream) {
+    ids.push(evt.id);
+  }
+  assert.deepStrictEqual(ids, ['c1', 'c2', 'c3'], `got ${JSON.stringify(ids)}`);
+  console.log('streaming smoke OK: 3 events from SSE');
+})();
+"""
+
+
+@pytest.mark.skipif(not _has_npm(), reason="npm/node not available")
+def test_runtime_streaming_smoke(tmp_path):
+    """A `streaming:` method emits with TS overloads; calling with
+    `stream: true` returns a `Stream<T>`; `for await` yields the
+    typed event payloads parsed from a mock SSE response. Stops on
+    `data: [DONE]`."""
+    api = build_ir(
+        load_spec(str(
+            Path(__file__).parent / "fixtures" / "chat" / "openapi.yml"
+        )),
+        load_config(str(
+            Path(__file__).parent / "fixtures" / "chat" / "stainless-config.yml"
+        )),
+    )
+    emit_ts(api, str(tmp_path))
+    root = tmp_path / "chat"
+    subprocess.run(["npm", "init", "-y"], cwd=root, check=True,
+                   capture_output=True)
+    subprocess.run(
+        ["npm", "install", "--save-dev", "--no-audit", "--no-fund",
+         "--silent", "typescript@5.6"],
+        cwd=root, check=True, capture_output=True,
+    )
+    tsc = subprocess.run(["npx", "tsc"], cwd=root, capture_output=True, text=True)
+    assert tsc.returncode == 0, f"tsc failed:\n{tsc.stdout}\n{tsc.stderr}"
+    (root / "smoke.js").write_text(_STREAMING_SMOKE_JS)
+    node = subprocess.run(
+        ["node", "smoke.js"], cwd=root, capture_output=True, text=True,
+    )
+    assert node.returncode == 0, (
+        f"streaming smoke failed:\n{node.stdout}\n{node.stderr}"
+    )
+
+
 @pytest.mark.skipif(not _has_npm(), reason="npm/node not available")
 def test_runtime_smoke_against_mock_fetch(tmp_path):
     """The generated TS SDK actually WORKS at runtime — not just tsc-
