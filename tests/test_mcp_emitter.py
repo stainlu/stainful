@@ -143,6 +143,39 @@ def test_unknown_tool_raises(tmp_path, monkeypatch):
         asyncio.run(mcp_server.call_tool("not_a_real_tool", {}))
 
 
+def test_streaming_method_hides_stream_param_and_locks_to_non_streaming(tmp_path):
+    """A streaming method (e.g. `chat.completions.create`) is still
+    surfaced as an MCP tool, but the `stream` discriminator is removed
+    from the input schema so the LLM can't toggle it. The SDK's default
+    (`stream=False`) means the call returns the JSON body as one
+    TextContent — exactly what MCP clients expect.
+    """
+    sdk_root = _gen_pair(
+        FIXTURES / "chat" / "openapi.yml",
+        FIXTURES / "chat" / "stainless-config.yml",
+        tmp_path,
+    )
+    server_path = sdk_root / "chat" / "mcp_server.py"
+    src = server_path.read_text()
+    # The tool exists. Name is the resource chain `chat.completions`
+    # joined with the method name `create`.
+    assert "name='chat_completions_create'" in src
+    # Description notes the streaming behavior.
+    assert "stainful MCP: tool always uses the non-streaming" in src
+    # `stream` discriminator removed from the tool's input schema —
+    # search the chat_completions_create tool block specifically.
+    import re
+    m = re.search(
+        r"name='chat_completions_create',.*?inputSchema=(.*?),\n    \)",
+        src, re.S,
+    )
+    assert m, "chat_completions_create tool not found in source"
+    assert '"stream"' not in m.group(1), (
+        f"'stream' discriminator must be excluded from input schema; got:\n"
+        f"{m.group(1)[:400]}"
+    )
+
+
 def test_path_arg_dispatch_against_real_spec(tmp_path):
     """Real openai-shape: a path-param tool (`fine_tuning_jobs_retrieve`)
     must dispatch with the path arg as a positional and any other args as
