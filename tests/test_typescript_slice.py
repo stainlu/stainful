@@ -77,6 +77,35 @@ def test_resource_methods_use_camelcase(tmp_path):
     assert "path: `/api/where/agency/${agency_id}.json`" in src
 
 
+def test_nested_resource_directories(tmp_path):
+    """Resources with subresources live in directories (matches openai-
+    node's layout). A 3-deep case like `chat.completions.messages` lives
+    at `resources/chat/completions/messages.ts`, with index.ts
+    re-exports for each parent dir."""
+    from stainful.emit.typescript import emit_ts as _emit_ts
+    api = build_ir(
+        load_spec(str(
+            Path(__file__).parent / "fixtures" / "chat" / "openapi.yml"
+        )),
+        load_config(str(
+            Path(__file__).parent / "fixtures" / "chat" / "stainless-config.yml"
+        )),
+    )
+    _emit_ts(api, str(tmp_path))
+    root = tmp_path / "chat"
+    # Chat has a subresource (completions) → branch shape:
+    assert (root / "src" / "resources" / "chat" / "chat.ts").exists()
+    assert (root / "src" / "resources" / "chat" / "index.ts").exists()
+    # Completions has no subresources here → leaf in chat/:
+    assert (root / "src" / "resources" / "chat" / "completions.ts").exists()
+    # index.ts re-exports the class
+    idx = (root / "src" / "resources" / "chat" / "index.ts").read_text()
+    assert "export { ChatResource } from './chat';" in idx
+    # And the imports inside chat/chat.ts go up two levels (../../_core/...).
+    chat_src = (root / "src" / "resources" / "chat" / "chat.ts").read_text()
+    assert "from '../../_core/resource'" in chat_src
+
+
 def test_response_types_imported_precisely(tmp_path):
     """Only USED type names import from `../types` — `tsc` is strict about
     unused imports (with isolatedModules + strict)."""

@@ -129,18 +129,37 @@ class _TSEmitter:
         # 1. vendor the TS runtime as `src/_core/`
         core = self.root / "src" / "_core"
         shutil.copytree(_RUNTIME_TS, core)
-        # 2. per-resource files (flat at v0.1 — nested layout is a polish item)
-        resource_files: dict[str, str] = {}
-        for r in self.api.root.subresources:
-            self._collect_resource(r, resource_files)
-        # 3. write types module (after all resources have rendered to gather refs)
+        # 2. Per-resource files in NESTED dirs (matches openai-node):
+        #      resources/embeddings.ts                          (leaf)
+        #      resources/chat/{chat.ts, index.ts}                (has sub)
+        #      resources/chat/completions/{completions.ts, index.ts, messages.ts}
+        # An `index.ts` per directory re-exports the resource class so
+        # `import { Chat } from 'pkg/resources/chat'` resolves either to
+        # the bare file or the subpackage transparently.
+        resources_root = self.root / "src" / "resources"
+        rendered: list[tuple[Resource, tuple[str, ...], str]] = []
+        for r, parent in _walk_tree(self.api.root.subresources):
+            rendered.append((r, parent, self._resource_src(r, list(parent))))
+        # 3. write types module (after all resources have rendered)
         if self._types_blocks:
             (self.root / "src" / "types" / "index.ts").write_text(
                 _HEADER + "\n".join(self._types_blocks) + "\n"
             )
-        # 4. write resource files
-        for fname, src in resource_files.items():
-            (self.root / "src" / "resources" / fname).write_text(src)
+        # 4. write resource files + per-directory index.ts re-exports
+        for r, parent, src in rendered:
+            name = snake(r.name)
+            cls = f"{pascal(r.name)}Resource"
+            if r.subresources:
+                d = resources_root.joinpath(*parent, name)
+                d.mkdir(parents=True, exist_ok=True)
+                (d / f"{name}.ts").write_text(src)
+                (d / "index.ts").write_text(
+                    _HEADER + f"export {{ {cls} }} from './{name}';\n"
+                )
+            else:
+                d = resources_root.joinpath(*parent)
+                d.mkdir(parents=True, exist_ok=True)
+                (d / f"{name}.ts").write_text(src)
         # 5. client.ts
         (self.root / "src" / "client.ts").write_text(self._client_src())
         # 6. index.ts (root exports)
@@ -150,19 +169,16 @@ class _TSEmitter:
         (self.root / "tsconfig.json").write_text(self._tsconfig())
 
     # ----- resource emission -----------------------------------------------
-    def _collect_resource(
-        self, r: Resource, files: dict[str, str], parent_chain: list[str] = (),  # type: ignore[assignment]
-    ) -> None:
-        files[f"{snake(r.name)}.ts"] = self._resource_src(r, parent_chain)
-        for sub in r.subresources:
-            self._collect_resource(sub, files, list(parent_chain) + [snake(r.name)])
-
     def _resource_src(self, r: Resource, parent_chain: list[str]) -> str:
         cls = f"{pascal(r.name)}Resource"
-        # Param interfaces are TOP-LEVEL TS declarations (can't live
-        # inside a class body); collect them per-method and emit them
-        # before the class.
-        method_blocks: list[tuple[str, str]] = []  # (interface_block, method_block)
+        # Depth from `src/` to the file's directory — drives how many
+        # `../` segments we need to reach `_core/`, `types/`, etc.
+        # A leaf at `<parent>/<name>.ts` lives `len(parent_chain) + 1`
+        # levels deep; a branch at `<parent>/<name>/<name>.ts` lives
+        # `len(parent_chain) + 2` deep.
+        depth = len(parent_chain) + (2 if r.subresources else 1)
+        up = "../" * depth
+        method_blocks: list[tuple[str, str]] = []
         for m in r.methods:
             iface, meth = self._method_src(m, r.name)
             method_blocks.append((iface, meth))
@@ -176,6 +192,9 @@ class _TSEmitter:
             f"    this.{snake(s.name)} = new {pascal(s.name)}Resource(client);"
             for s in r.subresources
         )
+        # Subresource imports stay sibling-relative — the per-dir
+        # `index.ts` re-exports the class whether the sibling is itself
+        # a file or a subpackage.
         sub_imports = "".join(
             f"import {{ {pascal(s.name)}Resource }} from './{snake(s.name)}';\n"
             for s in r.subresources
@@ -189,31 +208,27 @@ class _TSEmitter:
             + methods_src
             + "\n"
         )
-        # Scan the rendered source for known shared-model names; import
-        # them precisely from `../types`. Mirrors the Python emitter.
         scan = interfaces + body
         used_types = sorted(
             n for n in self._emitted_models
             if re.search(rf"\b{re.escape(n)}\b", scan)
         )
         types_import = (
-            f"import type {{ {', '.join(used_types)} }} from '../types';\n"
+            f"import type {{ {', '.join(used_types)} }} from '{up}types';\n"
             if used_types else ""
         )
-        # Import Stream when any of this resource's methods stream.
         stream_import = (
-            "import { Stream } from '../_core/streaming';\n"
+            f"import {{ Stream }} from '{up}_core/streaming';\n"
             if any(m.streaming is not None for m in r.methods) else ""
         )
-        # Import CursorPage when any of this resource's methods paginate.
         pagination_import = (
-            "import { CursorPage } from '../_core/pagination';\n"
+            f"import {{ CursorPage }} from '{up}_core/pagination';\n"
             if any(m.pagination is not None for m in r.methods) else ""
         )
         return (
             _HEADER
-            + "import { APIResource } from '../_core/resource';\n"
-            + "import type { BaseClient, RequestOptions } from '../_core/client';\n"
+            + f"import {{ APIResource }} from '{up}_core/resource';\n"
+            + f"import type {{ BaseClient, RequestOptions }} from '{up}_core/client';\n"
             + stream_import
             + pagination_import
             + types_import
@@ -599,3 +614,13 @@ class _TSEmitter:
 
 def _pkg_default(api_name: str) -> str:
     return api_name.replace("-sdk", "").replace("_", "-").lower()
+
+
+def _walk_tree(resources, parent: tuple[str, ...] = ()):
+    """Yield `(resource, parent_path)` for every resource in the tree.
+    `parent_path` is the chain of snake-case names — NOT including the
+    resource itself. Used for nested directory emission.
+    """
+    for r in resources:
+        yield r, parent
+        yield from _walk_tree(r.subresources, parent + (snake(r.name),))
