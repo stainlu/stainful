@@ -606,3 +606,186 @@ def test_runtime_smoke_against_mock_fetch(tmp_path):
     assert node.returncode == 0, (
         f"runtime smoke failed:\n{node.stdout}\n{node.stderr}"
     )
+
+
+# ----- webhook unwrap (Standard Webhooks) -----------------------------------
+
+
+def _gen_webhooks(tmp_path: Path) -> Path:
+    api = build_ir(
+        load_spec(str(
+            Path(__file__).parent / "fixtures" / "webhooks" / "openapi.yml"
+        )),
+        load_config(str(
+            Path(__file__).parent / "fixtures" / "webhooks" / "stainless.yml"
+        )),
+    )
+    emit_ts(api, str(tmp_path))
+    return tmp_path / "hooks"
+
+
+def test_webhook_unwrap_emits_typed_event_union_and_methods(tmp_path):
+    """`type: webhook_unwrap` emits a `WebhooksUnwrapEvent` union alias
+    and `unwrap()` + `verifySignature()` methods on the Webhooks
+    resource. No HTTP — just runtime-helper calls."""
+    root = _gen_webhooks(tmp_path)
+    src = (root / "src" / "resources" / "webhooks.ts").read_text()
+    # Type alias hoisted above the class, union of the configured events.
+    assert "export type WebhooksUnwrapEvent =" in src
+    assert "OrderCreatedEvent" in src
+    assert "OrderCancelledEvent" in src
+    # Both methods present, calling the runtime helpers.
+    assert "async unwrap(" in src
+    assert "async verifySignature(" in src
+    assert "_webhookUnwrapEvent<WebhooksUnwrapEvent>" in src
+    assert "_webhookVerifySignature(" in src
+    # Conditional imports threaded in.
+    assert "from '../_core/webhooks'" in src
+    # Root index re-exports the typed-error class for caller `instanceof`.
+    idx = (root / "src" / "index.ts").read_text()
+    assert "InvalidWebhookSignatureError" in idx
+
+
+@pytest.mark.skipif(not _has_npm(), reason="npm/node not available")
+def test_webhook_unwrap_tsc_clean(tmp_path):
+    """The webhooks fixture must tsc-clean. Typed event union, runtime
+    imports, and Promise return types all need to compose without errors."""
+    _tsc_clean(_gen_webhooks(tmp_path))
+
+
+_WEBHOOK_SMOKE_JS = r"""
+// Standard Webhooks runtime smoke — sign a payload with our own helper
+// (so the wire shape exactly matches what the SDK expects), then unwrap.
+const assert = require('node:assert');
+const crypto = require('node:crypto');
+const sdk = require('./dist/index.js');
+
+const SECRET = 'sw_test_secret_abc123';
+const WEBHOOK_ID = 'msg_abc123';
+
+function signHeaders(payload, secret, ts = Math.floor(Date.now() / 1000)) {
+  const signed = `${WEBHOOK_ID}.${ts}.${payload}`;
+  const sig = crypto.createHmac('sha256', secret)
+    .update(signed).digest('base64');
+  return {
+    'webhook-id': WEBHOOK_ID,
+    'webhook-timestamp': String(ts),
+    'webhook-signature': `v1,${sig}`,
+  };
+}
+
+(async () => {
+  const c = new sdk.Hooks({ apiKey: 'k' });
+
+  // Happy path: good signature → typed event back
+  {
+    const payload = JSON.stringify({ type: 'order.created', id: 'o1' });
+    const headers = signHeaders(payload, SECRET);
+    const evt = await c.webhooks.unwrap(payload, headers, { secret: SECRET });
+    assert.strictEqual(evt.type, 'order.created', `type was ${evt.type}`);
+    assert.strictEqual(evt.id, 'o1');
+  }
+
+  // Variant: second event type round-trips
+  {
+    const payload = JSON.stringify({ type: 'order.cancelled', id: 'o2' });
+    const headers = signHeaders(payload, SECRET);
+    const evt = await c.webhooks.unwrap(payload, headers, { secret: SECRET });
+    assert.strictEqual(evt.type, 'order.cancelled');
+  }
+
+  // Bad signature → InvalidWebhookSignatureError
+  {
+    const payload = JSON.stringify({ type: 'order.created', id: 'x' });
+    const headers = signHeaders(payload, 'wrong-secret');
+    try {
+      await c.webhooks.unwrap(payload, headers, { secret: SECRET });
+      throw new Error('expected InvalidWebhookSignatureError');
+    } catch (e) {
+      assert(e instanceof sdk.InvalidWebhookSignatureError,
+             `got ${e.constructor.name}`);
+    }
+  }
+
+  // Stale timestamp → InvalidWebhookSignatureError
+  {
+    const stale = Math.floor(Date.now() / 1000) - 3600;  // 1h old
+    const payload = JSON.stringify({ type: 'order.created', id: 'x' });
+    const headers = signHeaders(payload, SECRET, stale);
+    try {
+      await c.webhooks.unwrap(payload, headers, { secret: SECRET });
+      throw new Error('expected InvalidWebhookSignatureError');
+    } catch (e) {
+      assert(e instanceof sdk.InvalidWebhookSignatureError,
+             `got ${e.constructor.name}: ${e.message}`);
+    }
+  }
+
+  // Missing header → InvalidWebhookSignatureError
+  {
+    const payload = JSON.stringify({ type: 'order.created', id: 'x' });
+    const headers = signHeaders(payload, SECRET);
+    delete headers['webhook-signature'];
+    try {
+      await c.webhooks.unwrap(payload, headers, { secret: SECRET });
+      throw new Error('expected InvalidWebhookSignatureError');
+    } catch (e) {
+      assert(e instanceof sdk.InvalidWebhookSignatureError,
+             `got ${e.constructor.name}: ${e.message}`);
+    }
+  }
+
+  // `whsec_<b64>` prefix: secret should be base64-decoded
+  {
+    const rawKey = crypto.randomBytes(32);
+    const whsecSecret = `whsec_${rawKey.toString('base64')}`;
+    const payload = JSON.stringify({ type: 'order.created', id: 'wh1' });
+    const ts = Math.floor(Date.now() / 1000);
+    const signed = `${WEBHOOK_ID}.${ts}.${payload}`;
+    const sig = crypto.createHmac('sha256', rawKey)
+      .update(signed).digest('base64');
+    const headers = {
+      'webhook-id': WEBHOOK_ID,
+      'webhook-timestamp': String(ts),
+      'webhook-signature': `v1,${sig}`,
+    };
+    const evt = await c.webhooks.unwrap(payload, headers, { secret: whsecSecret });
+    assert.strictEqual(evt.id, 'wh1');
+  }
+
+  // verifySignature returns void on success (no parse).
+  {
+    const payload = JSON.stringify({ type: 'order.created', id: 'vs1' });
+    const headers = signHeaders(payload, SECRET);
+    const r = await c.webhooks.verifySignature(payload, headers, { secret: SECRET });
+    assert.strictEqual(r, undefined);
+  }
+
+  console.log('webhook smoke OK: 6 scenarios');
+})();
+"""
+
+
+@pytest.mark.skipif(not _has_npm(), reason="npm/node not available")
+def test_runtime_webhook_unwrap_smoke(tmp_path):
+    """Standard Webhooks at runtime: HMAC-SHA256 + base64 + `v1,<sig>`
+    header. Sign payloads with node's crypto so the wire matches what
+    the SDK expects, then unwrap. Covers happy, bad-sig, stale, missing-
+    header, `whsec_` base64 secret, and verifySignature."""
+    root = _gen_webhooks(tmp_path)
+    subprocess.run(["npm", "init", "-y"], cwd=root, check=True,
+                   capture_output=True)
+    subprocess.run(
+        ["npm", "install", "--save-dev", "--no-audit", "--no-fund",
+         "--silent", "typescript@5.6"],
+        cwd=root, check=True, capture_output=True,
+    )
+    tsc = subprocess.run(["npx", "tsc"], cwd=root, capture_output=True, text=True)
+    assert tsc.returncode == 0, f"tsc failed:\n{tsc.stdout}\n{tsc.stderr}"
+    (root / "smoke.js").write_text(_WEBHOOK_SMOKE_JS)
+    node = subprocess.run(
+        ["node", "smoke.js"], cwd=root, capture_output=True, text=True,
+    )
+    assert node.returncode == 0, (
+        f"webhook smoke failed:\n{node.stdout}\n{node.stderr}"
+    )

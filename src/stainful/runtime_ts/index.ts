@@ -13,6 +13,12 @@ export { Stream } from './streaming';
 export { CursorPage, type PaginationConfig } from './pagination';
 export { extractFiles, type Uploadable } from './uploads';
 export {
+  verifySignature as _webhookVerifySignature,
+  unwrapEvent as _webhookUnwrapEvent,
+  type WebhookHeaders,
+  type VerifyOptions,
+} from './webhooks';
+export {
   APIConnectionError,
   APIError,
   APIResponseValidationError,

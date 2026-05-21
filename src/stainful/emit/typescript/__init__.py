@@ -247,6 +247,17 @@ class _TSEmitter:
             f"'{up}_core/uploads';\n"
             if uploads_imports else ""
         )
+        # Webhook unwrap — pull runtime helpers + the WebhookHeaders type
+        # from `_core/webhooks` only when this resource owns one.
+        has_webhook = any(
+            m.emit_hints.get("type") == "webhook_unwrap" for m in r.methods
+        )
+        webhooks_import = (
+            f"import {{ unwrapEvent as _webhookUnwrapEvent, "
+            f"verifySignature as _webhookVerifySignature, "
+            f"type WebhookHeaders }} from '{up}_core/webhooks';\n"
+            if has_webhook else ""
+        )
         return (
             _HEADER
             + f"import {{ APIResource }} from '{up}_core/resource';\n"
@@ -254,6 +265,7 @@ class _TSEmitter:
             + stream_import
             + pagination_import
             + uploads_import
+            + webhooks_import
             + types_import
             + sub_imports
             + "\n"
@@ -263,10 +275,100 @@ class _TSEmitter:
             + "}\n"
         )
 
+    def _webhook_unwrap_src(
+        self, m: Method, resource_name: str,
+    ) -> tuple[str, str]:
+        """Emit `unwrap()` + `verifySignature()` for a `type: webhook_unwrap`
+        method. Mirrors the Python emitter's `_webhook_unwrap_src`. The
+        first tuple element is a top-level `type ...Event = A | B | ...;`
+        alias hoisted by the resource emitter; the second is both method
+        bodies concatenated as the class body. No HTTP — the runtime
+        Web-Crypto helpers do the work.
+
+        Async (Web Crypto's `subtle.sign` is async) — Python's sync
+        version mirrors `hmac.new`; we mirror what the platform gives us.
+        """
+        event_types = m.emit_hints.get("event_types") or {}
+        alias_name = f"{pascal(resource_name)}{pascal(m.name)}Event"
+        # Render the typed event union from the config `event_types:`
+        # block. Each ModelRef → a named TS type emitted into `types/`.
+        # Absent / empty → `unknown` (caller narrows at call site).
+        variants: list[str] = []
+        for ref in event_types.values():
+            if isinstance(ref, ModelRef):
+                variants.append(self._render_type(ref))
+        union_block = ""
+        if variants:
+            union_rhs = " | ".join(sorted(set(variants)))
+            union_block = f"export type {alias_name} = {union_rhs};\n\n"
+            event_ann = alias_name
+        else:
+            event_ann = "unknown"
+
+        # Env-var fallback name: `<BRAND_UPPER>_WEBHOOK_SECRET`. Matches
+        # the Python emitter exactly so docs apply across both SDKs.
+        env_var = self.api.name.upper().replace("-", "_").replace(" ", "_")
+        env_var = "".join(c if c.isalnum() or c == "_" else "_" for c in env_var)
+        env_var = f"{env_var}_WEBHOOK_SECRET"
+
+        # `process.env` may not exist in browsers / some edge runtimes —
+        # access via `globalThis` so the lookup compiles + runs anywhere.
+        # If `opts.secret` is undefined AND the env var is unset, throw.
+        secret_resolve = (
+            "    const _secret = opts?.secret ?? "
+            "(globalThis as { process?: { env?: Record<string, string | undefined> } })"
+            f".process?.env?.['{env_var}'];\n"
+            "    if (!_secret) {\n"
+            "      throw new Error(\n"
+            f"        'Webhook secret required: pass `secret` or set "
+            f"{env_var} env var.',\n"
+            "      );\n"
+            "    }\n"
+        )
+        doc = (
+            "Verify the webhook signature (Standard Webhooks scheme) and "
+            "parse the payload into the typed event."
+        )
+        method_name = camel_method(m.name)
+        unwrap = (
+            f"  /** {doc} */\n"
+            f"  async {method_name}(\n"
+            f"    payload: string | Uint8Array,\n"
+            f"    headers: WebhookHeaders,\n"
+            f"    opts?: {{ secret?: string; tolerance?: number }},\n"
+            f"  ): Promise<{event_ann}> {{\n"
+            f"{secret_resolve}"
+            f"    return _webhookUnwrapEvent<{event_ann}>(\n"
+            f"      payload, headers, _secret,\n"
+            f"      {{ tolerance: opts?.tolerance }},\n"
+            f"    );\n"
+            f"  }}"
+        )
+        verify = (
+            "  /** Verify the Standard-Webhooks signature; "
+            "throws `InvalidWebhookSignatureError` on failure. */\n"
+            "  async verifySignature(\n"
+            "    payload: string | Uint8Array,\n"
+            "    headers: WebhookHeaders,\n"
+            "    opts?: { secret?: string; tolerance?: number },\n"
+            "  ): Promise<void> {\n"
+            f"{secret_resolve}"
+            "    return _webhookVerifySignature(\n"
+            "      payload, headers, _secret,\n"
+            "      { tolerance: opts?.tolerance },\n"
+            "    );\n"
+            "  }"
+        )
+        return union_block, unwrap + "\n\n" + verify
+
     def _method_src(self, m: Method, resource_name: str) -> tuple[str, str]:
         """Returns `(top_level_interface_block, method_body)` so the
         resource emitter can hoist the param interface above the class.
         """
+        if m.emit_hints.get("type") == "webhook_unwrap":
+            # No HTTP — the runtime Web-Crypto helpers do the work.
+            # The path/verb/body machinery below would emit garbage.
+            return self._webhook_unwrap_src(m, resource_name)
         path_args = [snake(p.name) for p in m.path_params]
         path_arg_decls = ", ".join(f"{a}: string" for a in path_args)
         param_fields: list[str] = []
