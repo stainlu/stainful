@@ -144,3 +144,133 @@ def test_chat_fixture_tsc_clean(tmp_path):
     )
     emit_ts(api, str(tmp_path))
     _tsc_clean(tmp_path / "chat")
+
+
+# ----- runtime smoke (requires npm) -----------------------------------------
+
+
+_SMOKE_JS = r"""
+// Generated runtime smoke test — verify the SDK actually works.
+const assert = require('node:assert');
+const sdk = require('./dist/index.js');
+
+let failed = 0;
+function check(name, fn) {
+  return fn()
+    .then(() => console.log(`  ✓ ${name}`))
+    .catch((e) => { failed++; console.log(`  ✗ ${name}: ${e.message}`); });
+}
+
+const okResponse = (body) => new Response(
+  JSON.stringify(body),
+  { status: 200, headers: { 'content-type': 'application/json' } }
+);
+
+const errorResponse = (status, body) => new Response(
+  JSON.stringify(body),
+  { status, headers: { 'content-type': 'application/json' } }
+);
+
+(async () => {
+  // Happy path: URL, method, auth header, JSON parsing.
+  await check('happy GET → right URL/headers/parsed body', async () => {
+    const calls = [];
+    const fetchMock = async (url, init) => {
+      calls.push({ url: String(url), method: init?.method,
+                   headers: { ...(init?.headers || {}) } });
+      return okResponse({
+        code: 200, version: 1, currentTime: 1234, text: 'ok',
+        data: { entry: { id: 'A1', name: 'T', timezone: 'UTC', url: 'x' },
+                references: { agencies: [] } },
+      });
+    };
+    const c = new sdk.OnebusawaySDK({ apiKey: 'k', fetch: fetchMock });
+    const r = await c.agency.retrieve('A1');
+    assert.strictEqual(r.data.entry.id, 'A1');
+    assert.strictEqual(calls.length, 1);
+    assert(calls[0].url.endsWith('/api/where/agency/A1.json'),
+           `URL was ${calls[0].url}`);
+    assert.strictEqual(calls[0].method, 'GET');
+    assert.strictEqual(calls[0].headers['Authorization'], 'Bearer k');
+    assert.strictEqual(calls[0].headers['Accept'], 'application/json');
+  });
+
+  // 404 → NotFoundError (typed exception, status_code attached).
+  await check('404 → NotFoundError', async () => {
+    const fetchMock = async () => errorResponse(404, {
+      code: 404, version: 1, currentTime: 0, text: 'not found',
+    });
+    const c = new sdk.OnebusawaySDK({
+      apiKey: 'k', maxRetries: 0, fetch: fetchMock,
+    });
+    try {
+      await c.agency.retrieve('missing');
+      throw new Error('expected NotFoundError');
+    } catch (e) {
+      assert(e instanceof sdk.NotFoundError, `got ${e.constructor.name}`);
+      assert.strictEqual(e.status, 404);
+    }
+  });
+
+  // 429 → retry-after-respected RateLimitError after retries exhaust.
+  await check('429 → RateLimitError after retries', async () => {
+    let n = 0;
+    const fetchMock = async () => {
+      n++;
+      return new Response(JSON.stringify({ code: 429 }),
+        { status: 429, headers: { 'content-type': 'application/json',
+                                   'retry-after': '0' } });
+    };
+    const c = new sdk.OnebusawaySDK({
+      apiKey: 'k', maxRetries: 1, fetch: fetchMock,
+    });
+    try {
+      await c.agency.retrieve('x');
+      throw new Error('expected RateLimitError');
+    } catch (e) {
+      assert(e instanceof sdk.RateLimitError, `got ${e.constructor.name}`);
+      assert(n >= 2, `expected at least 2 fetch calls (retry); got ${n}`);
+    }
+  });
+
+  if (failed > 0) {
+    console.error(`\n${failed} smoke test(s) failed`);
+    process.exit(1);
+  }
+})();
+"""
+
+
+@pytest.mark.skipif(not _has_npm(), reason="npm/node not available")
+def test_runtime_smoke_against_mock_fetch(tmp_path):
+    """The generated TS SDK actually WORKS at runtime — not just tsc-
+    clean. Construct the client with an injectable mock `fetch`,
+    call a method, assert the wire request shape + the parsed
+    response. Plus error-path coverage (404 → NotFoundError, 429 →
+    RateLimitError after retries).
+
+    This is the v0.5-readiness bar for TypeScript: the SDK's
+    runtime semantics work, not just the type system.
+    """
+    root = _gen(tmp_path)
+    subprocess.run(
+        ["npm", "init", "-y"], cwd=root, check=True, capture_output=True,
+    )
+    subprocess.run(
+        ["npm", "install", "--save-dev", "--no-audit", "--no-fund",
+         "--silent", "typescript@5.6"],
+        cwd=root, check=True, capture_output=True,
+    )
+    # Compile to dist/
+    tsc = subprocess.run(
+        ["npx", "tsc"], cwd=root, capture_output=True, text=True,
+    )
+    assert tsc.returncode == 0, f"tsc failed:\n{tsc.stdout}\n{tsc.stderr}"
+    # Drop the smoke file + run via node
+    (root / "smoke.js").write_text(_SMOKE_JS)
+    node = subprocess.run(
+        ["node", "smoke.js"], cwd=root, capture_output=True, text=True,
+    )
+    assert node.returncode == 0, (
+        f"runtime smoke failed:\n{node.stdout}\n{node.stderr}"
+    )
