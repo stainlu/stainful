@@ -5,6 +5,106 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.5.0] — 2026-05-21
+
+**TypeScript ships.** One `stainless.yml` now emits a working SDK in
+both Python and TypeScript. The TS slice covers everything that
+makes a Stainless-generated openai-node SDK actually usable — typed
+errors, retries with backoff + jitter + idempotency, **SSE streaming
+with narrowed overloads**, and **`CursorPage<T>` pagination that walks
+all pages via `for await`** — all runtime-verified against mock
+fetch + mock SSE + mock paginated responses. Plus the Python side
+closes the last documented gap (**multi-content request bodies** with
+JSON ↔ multipart auto-detect) and ships docs / MCP polish.
+
+### Added — TypeScript
+
+- **TypeScript emitter (`stainful generate-ts`).** Same IR as the
+  Python emitter — only the renderer differs. Generates a SDK whose
+  symbol surface matches openai-node (`<Brand>` client class
+  extending `BaseClient`, `<Name>Resource` extending `APIResource`,
+  typed error hierarchy with the same names as the Python side,
+  package.json + tsconfig.json so users `npm install && tsc`).
+  Property names that aren't valid TS identifiers (e.g.
+  `"git.branch"`) are quoted in interfaces. Methods camelCase per TS
+  convention. tsc strict mode passes on OneBusAway + chat fixture +
+  the full openai-openapi spec (162 paths, 983 schemas).
+- **SSE streaming with narrowed overloads.** Methods with a
+  `streaming:` config block emit two overloads
+  (`stream?: false` → `Promise<Response>`; `stream: true` →
+  `Promise<Stream<Event>>`) so users get perfect narrowing at the
+  call site:
+      const stream = await client.chat.completions.create({
+        model: 'gpt-4', stream: true, messages: [...]
+      });
+      for await (const event of stream) { ... }
+  Runtime `Stream<T>` (`_core/streaming.ts`) parses
+  `data: <json>\n\n` blocks, stops at `[DONE]`, tolerates non-JSON
+  keepalive/comment frames, has `.abort()` to close mid-stream.
+- **`CursorPage<T>` pagination.** Paginated methods return
+  `Promise<CursorPage<Item>>`; the page object is an
+  `AsyncIterable<T>` that walks subsequent pages on demand:
+      const page = await client.things.list({ limit: 50 });
+      for await (const thing of page) { ... }    // auto-pages
+  One generic algorithm covers every forward-only cursor variant
+  (`after=<last_id>`, `page_token=<next_page>`, …) — the wire
+  param + cursor response field come from the same stainless.yml
+  `pagination[].request` / `.response` blocks the Python side uses.
+- **TypeScript runtime, vendored as `_core/`.** Fetch-based
+  `BaseClient` with retries (backoff + jitter + `Retry-After` +
+  idempotency-key on retried writes), full typed error hierarchy
+  (`APIError`, `RateLimitError`, `NotFoundError`, …), abort signal /
+  per-request timeout, dependency-injectable `fetch` for tests, full
+  ESM/CJS compatible. No npm deps in the generated runtime.
+- **Runtime smoke tests** (Node-skipped if not available): happy
+  GET / 404→`NotFoundError` / 429→`RateLimitError` after retries /
+  SSE `for await` yields 3 events / pagination `for await` walks
+  2 pages with the cursor wire param. The TS SDK is no longer "type-
+  checked" — it's *runtime-verified*.
+
+### Added — Python (closes the last migration-guide gap)
+
+- **Multi-content request bodies (JSON ↔ multipart auto-detect).**
+  Oracle: openai-python's `skills.create(files=…)` — a single method
+  whose runtime extracts file-like values from the body; if present
+  → multipart wire request; else → JSON. Same `c.x.create(...)`
+  call shape both ways, decided by the arguments the user actually
+  passes. The migration guide gap list is now **empty** (modulo
+  JSON-OR-form-urlencoded same-op, which has no auto-detect possible
+  and remains deferred).
+
+### Improved
+
+- **Docs generator polish.** Per-resource `Types:` import blocks
+  (matches openai-python's api.md format) listing the named models
+  the resource's methods reference. Method.docs now populated from
+  the OpenAPI op's `description` (falling back to `summary`) — so
+  generated Python SDK methods get real docstrings, and MCP tool
+  descriptions are spec-sourced rather than synthesized.
+- **MCP generator polish.** Streaming methods (`chat.completions
+  .create`) now lock to the non-streaming wire shape — the `stream`
+  discriminator is removed from the input schema (LLM clients can't
+  toggle it) and the tool description notes "(stainful MCP: tool
+  always uses the non-streaming wire shape; the full response is
+  returned in one TextContent.)". Avoids ambiguous "what does
+  stream=True do here?" tool calls.
+
+### Verified
+
+- 133 tests green (was 118 at v0.4; 15 new regression tests
+  including the TS runtime smokes).
+- mypy 0 on 253 combined source files.
+- 10 consecutive green CI pushes since v0.4.
+
+### Honest scope boundaries
+
+TypeScript v0.1 ships streaming + pagination + retries + typed
+errors. Still deferred (tracked, not blocking openai-style
+workflows): multipart / binary upload, webhook unwrap,
+nested resource directories (`resources/chat/completions/
+messages.ts` shape), MCP server emit from TS. Python is at
+feature-parity with what Stainless was generating for openai-python.
+
 ## [0.4.0] — 2026-05-20
 
 **Three new generators + every documented adoption-blocker closed.**

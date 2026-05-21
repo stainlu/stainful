@@ -1,6 +1,6 @@
 [project]
 name = "stainful"
-version = "0.4.0"
+version = "0.5.0"
 description = "Fully open-source, drop-in stainless.yml-compatible idiomatic Python SDK generator."
 readme = "README.md"
 requires-python = ">=3.10"
