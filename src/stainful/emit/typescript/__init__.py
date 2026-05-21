@@ -225,12 +225,35 @@ class _TSEmitter:
             f"import {{ CursorPage }} from '{up}_core/pagination';\n"
             if any(m.pagination is not None for m in r.methods) else ""
         )
+        # Import extractFiles + Uploadable as needed.
+        needs_extract_files = any(
+            m.body is not None and m.body.multi_content for m in r.methods
+        )
+        needs_uploadable = any(
+            m.body is not None
+            and (
+                m.body.content_type == ContentType.BINARY
+                or m.body.multi_content
+            )
+            for m in r.methods
+        )
+        uploads_imports: list[str] = []
+        if needs_extract_files:
+            uploads_imports.append("extractFiles as _extractFiles")
+        if needs_uploadable:
+            uploads_imports.append("type Uploadable")
+        uploads_import = (
+            f"import {{ {', '.join(uploads_imports)} }} from "
+            f"'{up}_core/uploads';\n"
+            if uploads_imports else ""
+        )
         return (
             _HEADER
             + f"import {{ APIResource }} from '{up}_core/resource';\n"
             + f"import type {{ BaseClient, RequestOptions }} from '{up}_core/client';\n"
             + stream_import
             + pagination_import
+            + uploads_import
             + types_import
             + sub_imports
             + "\n"
@@ -250,8 +273,14 @@ class _TSEmitter:
         if m.body is not None and m.body.content_type == ContentType.JSON:
             obj = self._resolve_object(m.body.type)
             if obj is not None:
+                # In multi-content (JSON ↔ multipart) bodies, treat
+                # `bytes` fields as `Uploadable` and `Array<bytes>` as
+                # `Array<Uploadable>` — mirrors the Python emitter's
+                # `wants_file_typing` rule. Plain JSON bodies render
+                # bytes as `Blob` (the narrower default).
+                want_uploadable = m.body.multi_content
                 for p in obj.properties:
-                    ann = self._render_type(p.type)
+                    ann = self._render_property_type(p.type, want_uploadable)
                     optional = "" if p.required else "?"
                     if p.nullable:
                         ann = f"{ann} | null"
@@ -272,6 +301,10 @@ class _TSEmitter:
             path = path.replace("{" + p.name + "}", "${" + snake(p.name) + "}")
         body_arg = ""
         query_arg = ""
+        # Multi-content auto-detect (JSON ↔ multipart): emit
+        # `extractFiles(_body, paths)` then conditional body / files.
+        # Oracle: openai-node's `maybeMultipartFormRequestOptions` shape.
+        extract_block = ""
         if (
             m.body is not None
             and m.body.content_type == ContentType.JSON
@@ -283,10 +316,39 @@ class _TSEmitter:
                 if obj is not None else []
             )
             if body_keys:
-                body_arg = (
-                    "\n        body: Object.fromEntries(Object.entries(params)"
-                    f".filter(([k]) => [{', '.join(body_keys)}].includes(k))),"
-                )
+                if m.body.multi_content and m.body.file_paths:
+                    # Build `_body` as a fresh object (so the runtime
+                    # mutating it during extractFiles doesn't surprise
+                    # the caller's params), call `extractFiles`, then
+                    # branch.
+                    paths_lit = (
+                        "["
+                        + ", ".join(
+                            "[" + ", ".join(repr(s) for s in p) + "]"
+                            for p in m.body.file_paths
+                        )
+                        + "]"
+                    )
+                    extract_block = (
+                        f"    const _body: Record<string, unknown> = "
+                        f"Object.fromEntries(Object.entries(params)"
+                        f".filter(([k]) => [{', '.join(body_keys)}].includes(k)));\n"
+                        f"    const _files = _extractFiles(_body, {paths_lit});\n"
+                    )
+                    body_arg = (
+                        "\n        body: _body,"
+                        "\n        files: _files.length > 0 ? _files : undefined,"
+                    )
+                else:
+                    body_arg = (
+                        "\n        body: Object.fromEntries(Object.entries(params)"
+                        f".filter(([k]) => [{', '.join(body_keys)}].includes(k))),"
+                    )
+        # Binary (`application/octet-stream`) upload — single opaque
+        # `body` param sent verbatim, octet-stream content-type set by
+        # the runtime.
+        if m.body is not None and m.body.content_type == ContentType.BINARY:
+            body_arg = "\n        body: body,\n        binary: true,"
         if m.query_params and has_params:
             qkeys = [f'"{p.name}"' for p in m.query_params]
             query_arg = (
@@ -351,8 +413,15 @@ class _TSEmitter:
                 f"  }}"
             )
         else:
+            # Binary methods take a single `body: Uploadable` instead of
+            # a typed params object.
+            extra_body_arg = ""
+            if m.body is not None and m.body.content_type == ContentType.BINARY:
+                extra_body_arg = "body: Uploadable"
             signature_args = ", ".join(filter(None, [
-                path_arg_decls, params_decl, "options?: Partial<RequestOptions>",
+                path_arg_decls,
+                params_decl or extra_body_arg,
+                "options?: Partial<RequestOptions>",
             ]))
             pagination_arg = ""
             if m.pagination is not None:
@@ -374,6 +443,7 @@ class _TSEmitter:
                 )
             method_body = (
                 f"  {camel_method(m.name)}({signature_args}): Promise<{ret_type}> {{\n"
+                f"{extract_block}"
                 f"    return this._client.request<{ret_type}>({{\n"
                 f"      method: '{verb}',\n"
                 f"      path: `{path}`,"
@@ -418,6 +488,26 @@ class _TSEmitter:
         return "unknown"
 
     # ----- type rendering --------------------------------------------------
+    def _render_property_type(self, t: Type, want_uploadable: bool) -> str:
+        """Like `_render_type` but, when `want_uploadable`, treats
+        binary-typed leaves as `Uploadable` (and arrays of them as
+        `Array<Uploadable>`) — matches the Python emitter's `FileTypes`
+        substitution for multipart-shape fields."""
+        if not want_uploadable:
+            return self._render_type(t)
+        if (
+            isinstance(t, PrimitiveType)
+            and t.kind == PrimitiveKind.BYTES
+        ):
+            return "Uploadable"
+        if (
+            isinstance(t, ArrayType)
+            and isinstance(t.item, PrimitiveType)
+            and t.item.kind == PrimitiveKind.BYTES
+        ):
+            return "Array<Uploadable>"
+        return self._render_type(t)
+
     def _render_type(self, t: Type) -> str:
         if isinstance(t, PrimitiveType):
             return _PRIM_TS.get(t.kind, "unknown")

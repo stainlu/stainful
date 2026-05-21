@@ -11,6 +11,7 @@ export type {
 export { APIResource } from './resource';
 export { Stream } from './streaming';
 export { CursorPage, type PaginationConfig } from './pagination';
+export { extractFiles, type Uploadable } from './uploads';
 export {
   APIConnectionError,
   APIError,

@@ -34,6 +34,10 @@ export interface RequestOptions {
   /** When set, wraps the parsed JSON in a `CursorPage<Item>` that
    *  walks pages on demand via `Symbol.asyncIterator`. */
   pagination?: PaginationConfig;
+  /** Raw octet-stream upload (S3-style PUT, GitHub release-asset
+   *  upload). `body` is sent verbatim with
+   *  `Content-Type: application/octet-stream`. */
+  binary?: boolean;
 }
 
 export interface ClientOptions {
@@ -101,7 +105,12 @@ export abstract class BaseClient {
         ...(opts.headers ?? {}),
       };
       let body: BodyInit | undefined;
-      if (opts.files && opts.files.length > 0) {
+      if (opts.binary) {
+        // Raw octet-stream upload — `body` is bytes / a Blob / a Uint8Array.
+        // Send verbatim; don't JSON-encode.
+        body = opts.body as BodyInit;
+        headers['Content-Type'] = headers['Content-Type'] ?? 'application/octet-stream';
+      } else if (opts.files && opts.files.length > 0) {
         const fd = new FormData();
         if (opts.body && typeof opts.body === 'object') {
           for (const [k, v] of Object.entries(opts.body as Record<string, unknown>)) {
@@ -110,7 +119,32 @@ export abstract class BaseClient {
           }
         }
         for (const [name, value] of opts.files) {
-          fd.append(name, value as Blob);
+          // FormData.append accepts Blob | string. Wrap raw bytes /
+          // ArrayBuffer / Uint8Array into a Blob so the wire form
+          // works under both browser and Node 20+ undici.
+          let part: Blob | string;
+          if (typeof value === 'string') {
+            part = value;
+          } else if (value instanceof Blob) {
+            part = value;
+          } else if (Array.isArray(value)) {
+            // [filename, content, ?contentType] tuple — index access
+            // (vs destructuring + tuple-cast) avoids TS's strict
+            // tuple-conversion check.
+            const arr = value as unknown[];
+            const filename = arr[0] as string;
+            const content = arr[1];
+            const contentType = arr.length > 2 ? (arr[2] as string) : undefined;
+            part = new Blob(
+              [content as BlobPart],
+              contentType ? { type: contentType } : {},
+            );
+            fd.append(name, part, filename);
+            continue;
+          } else {
+            part = new Blob([value as BlobPart]);
+          }
+          fd.append(name, part);
         }
         body = fd;
         // Do NOT set Content-Type — `fetch` adds the boundary itself.

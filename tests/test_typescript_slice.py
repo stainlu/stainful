@@ -389,6 +389,156 @@ def test_runtime_pagination_smoke(tmp_path):
     )
 
 
+_BINARY_UPLOAD_SMOKE_JS = r"""
+// Raw octet-stream upload (S3-style PUT). `body: Uploadable` ships
+// verbatim with Content-Type: application/octet-stream.
+const assert = require('node:assert');
+const sdk = require('./dist/index.js');
+
+(async () => {
+  const calls = [];
+  const fetchMock = async (url, init) => {
+    const bodyBytes = init?.body ? await new Response(init.body).arrayBuffer() : null;
+    calls.push({
+      url: String(url),
+      contentType: init?.headers?.['Content-Type'] || '<none>',
+      bytes: bodyBytes ? Array.from(new Uint8Array(bodyBytes)) : null,
+    });
+    return new Response(JSON.stringify({ etag: 'deadbeef' }),
+      { status: 200, headers: { 'content-type': 'application/json' } });
+  };
+  const c = new sdk.BinaryUpload({ apiKey: 'k', fetch: fetchMock });
+  const payload = new Uint8Array([0x00, 0x01, 0xff]);
+  const r = await c.objects.put('bk', 'k1.bin', payload);
+  assert.strictEqual(r.etag, 'deadbeef');
+  assert(calls[0].url.endsWith('/buckets/bk/objects/k1.bin'),
+         `url was ${calls[0].url}`);
+  assert.strictEqual(calls[0].contentType, 'application/octet-stream',
+                     `ct was ${calls[0].contentType}`);
+  assert.deepStrictEqual(calls[0].bytes, [0x00, 0x01, 0xff],
+                         `bytes mismatch: ${calls[0].bytes}`);
+  console.log('binary smoke OK: octet-stream sent verbatim');
+})();
+"""
+
+
+@pytest.mark.skipif(not _has_npm(), reason="npm/node not available")
+def test_runtime_binary_upload_smoke(tmp_path):
+    """Raw `application/octet-stream` upload: `body: Uploadable` param,
+    bytes sent verbatim, octet-stream Content-Type set by runtime."""
+    api = build_ir(
+        load_spec(str(
+            Path(__file__).parent / "fixtures" / "upload_binary" / "openapi.yml"
+        )),
+        load_config(str(
+            Path(__file__).parent / "fixtures" / "upload_binary" / "stainless.yml"
+        )),
+    )
+    emit_ts(api, str(tmp_path))
+    root = tmp_path / "binary_upload"
+    subprocess.run(["npm", "init", "-y"], cwd=root, check=True,
+                   capture_output=True)
+    subprocess.run(
+        ["npm", "install", "--save-dev", "--no-audit", "--no-fund",
+         "--silent", "typescript@5.6"],
+        cwd=root, check=True, capture_output=True,
+    )
+    tsc = subprocess.run(["npx", "tsc"], cwd=root, capture_output=True, text=True)
+    assert tsc.returncode == 0, f"tsc failed:\n{tsc.stdout}\n{tsc.stderr}"
+    (root / "smoke.js").write_text(_BINARY_UPLOAD_SMOKE_JS)
+    node = subprocess.run(
+        ["node", "smoke.js"], cwd=root, capture_output=True, text=True,
+    )
+    assert node.returncode == 0, (
+        f"binary upload smoke failed:\n{node.stdout}\n{node.stderr}"
+    )
+
+
+_MULTI_CONTENT_SMOKE_JS = r"""
+// Multi-content auto-detect (JSON ↔ multipart) smoke. When the user
+// passes files=[...], the SDK sends multipart; else JSON.
+const assert = require('node:assert');
+const sdk = require('./dist/index.js');
+
+(async () => {
+  // Path A: no files → JSON wire
+  {
+    const calls = [];
+    const fetchMock = async (url, init) => {
+      calls.push({
+        contentType: init?.headers?.['Content-Type'] || '<none>',
+        bodyKind: init?.body?.constructor?.name || typeof init?.body,
+      });
+      return new Response(JSON.stringify({ id: 'sk1', name: 'n' }),
+        { status: 200, headers: { 'content-type': 'application/json' } });
+    };
+    const c = new sdk.Skills({ apiKey: 'k', fetch: fetchMock });
+    await c.skills.create({ files: [], name: 'no-files', description: 'd' });
+    assert(calls[0].contentType.startsWith('application/json'),
+           `expected JSON; got ${calls[0].contentType}`);
+    assert.strictEqual(calls[0].bodyKind, 'String', `body was ${calls[0].bodyKind}`);
+  }
+
+  // Path B: files present → multipart wire
+  {
+    const calls = [];
+    const fetchMock = async (url, init) => {
+      calls.push({
+        contentType: init?.headers?.['Content-Type'] || '<none>',
+        bodyKind: init?.body?.constructor?.name || typeof init?.body,
+      });
+      return new Response(JSON.stringify({ id: 'sk2', name: 'n' }),
+        { status: 200, headers: { 'content-type': 'application/json' } });
+    };
+    const c = new sdk.Skills({ apiKey: 'k', fetch: fetchMock });
+    await c.skills.create({
+      files: [new Blob([new Uint8Array([0xff, 0x00, 0xfe])])],
+      name: 'with-files', description: 'd',
+    });
+    // For multipart, Content-Type either absent (fetch sets it with
+    // boundary) or starts with multipart/form-data. Body is FormData.
+    assert.strictEqual(calls[0].bodyKind, 'FormData',
+                       `body was ${calls[0].bodyKind}`);
+  }
+  console.log('multi-content smoke OK: JSON when no files, multipart when files');
+})();
+"""
+
+
+@pytest.mark.skipif(not _has_npm(), reason="npm/node not available")
+def test_runtime_multi_content_smoke(tmp_path):
+    """JSON ↔ multipart auto-detect via `extractFiles`. The SAME method
+    call shape (`create({ files: [...], ... })`) generates a JSON wire
+    when files is empty and a multipart wire when files have an
+    Uploadable. Mirrors the Python multi-content test."""
+    api = build_ir(
+        load_spec(str(
+            Path(__file__).parent / "fixtures" / "multi_content" / "openapi.yml"
+        )),
+        load_config(str(
+            Path(__file__).parent / "fixtures" / "multi_content" / "stainless.yml"
+        )),
+    )
+    emit_ts(api, str(tmp_path))
+    root = tmp_path / "skills"
+    subprocess.run(["npm", "init", "-y"], cwd=root, check=True,
+                   capture_output=True)
+    subprocess.run(
+        ["npm", "install", "--save-dev", "--no-audit", "--no-fund",
+         "--silent", "typescript@5.6"],
+        cwd=root, check=True, capture_output=True,
+    )
+    tsc = subprocess.run(["npx", "tsc"], cwd=root, capture_output=True, text=True)
+    assert tsc.returncode == 0, f"tsc failed:\n{tsc.stdout}\n{tsc.stderr}"
+    (root / "smoke.js").write_text(_MULTI_CONTENT_SMOKE_JS)
+    node = subprocess.run(
+        ["node", "smoke.js"], cwd=root, capture_output=True, text=True,
+    )
+    assert node.returncode == 0, (
+        f"multi-content smoke failed:\n{node.stdout}\n{node.stderr}"
+    )
+
+
 @pytest.mark.skipif(not _has_npm(), reason="npm/node not available")
 def test_runtime_streaming_smoke(tmp_path):
     """A `streaming:` method emits with TS overloads; calling with
