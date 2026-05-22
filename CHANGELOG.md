@@ -5,6 +5,82 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.6.0] — 2026-05-22
+
+**TypeScript completeness pass.** v0.5 shipped the TypeScript emitter
+with an explicit deferred list — multipart / binary upload, webhook
+unwrap, and nested resource directories. This release closes that
+list. The same `stainless.yml` now emits a TypeScript SDK whose
+file layout, request shapes, and webhook handling match what
+Stainless generated for openai-node, for every API shape the Python
+side already supported.
+
+### Added — TypeScript
+
+- **Nested resource directories.** Subresources now emit as
+  directories matching openai-node's layout — a 3-deep
+  `chat.completions.messages` lands at
+  `resources/chat/completions/messages.ts`, with per-directory
+  `index.ts` re-exports so `import { Chat } from 'pkg/resources/chat'`
+  resolves whether the sibling is a bare file or a subpackage.
+  Cross-cutting imports are depth-aware (`../` count derived from
+  the resource's position in the tree). Drop-in path parity for
+  anyone migrating an openai-node-shaped import.
+- **Multipart, multi-content, and binary uploads.** Three wire
+  shapes, same IR the Python side uses:
+  - *Multi-content auto-detect (JSON ↔ multipart):* a single method
+    (`c.skills.create({ files: [...], ... })`) sends multipart when
+    file-like values are present, JSON when they aren't — decided by
+    the arguments passed, via a TS `extractFiles` mirroring the
+    Python runtime. Oracle: openai-node's
+    `maybeMultipartFormRequestOptions`.
+  - *Raw binary upload:* `application/octet-stream` methods take a
+    single `body: Uploadable` and ship the bytes verbatim.
+  - `Uploadable` covers `Blob | File | ArrayBuffer | Uint8Array |
+    [filename, content, contentType?]`; `FormData` parts wrap raw
+    bytes in a `Blob` so the wire works under both browser fetch and
+    Node 20+ undici.
+- **Webhook unwrap (Standard Webhooks).** `type: webhook_unwrap`
+  config methods now emit in TypeScript with the same shape as
+  Python: `unwrap(payload, headers, opts?)` returns the typed event
+  union (`type WebhooksUnwrapEvent = OrderCreatedEvent | …`), and
+  `verifySignature(...)` throws `InvalidWebhookSignatureError` on a
+  bad signature. HMAC-SHA256 over `{webhook_id}.{timestamp}.{body}`,
+  base64, `v1,<sig>` header, `whsec_` prefix base64-decoded —
+  identical algorithm to the Python side (standardwebhooks.com).
+  Runtime uses Web Crypto (`crypto.subtle.sign`) — global in Node
+  20+, browsers, and edge runtimes — with no `@types/node`
+  dependency. Env-var fallback (`<BRAND>_WEBHOOK_SECRET`) is read via
+  `globalThis.process` so the lookup compiles in browser / edge
+  contexts where `process` may not exist.
+
+### Improved
+
+- **Package description + tooling now reflect both targets.** The
+  PyPI description no longer says "Python SDK generator" — stainful
+  emits Python *and* TypeScript from one config.
+
+### Verified
+
+- 139 tests green (was 133 at v0.5; +6 new TS regression tests
+  covering nested dirs, multi-content/binary, and the webhook
+  scenarios — happy path, both event variants, bad signature, stale
+  timestamp, missing header, `whsec_` base64 decode, void
+  `verifySignature`).
+- Every TS feature is runtime-verified, not just tsc-clean: the
+  webhook smoke signs payloads with `node:crypto` so the wire shape
+  exactly matches what the SDK expects, then unwraps.
+
+### Honest scope boundaries
+
+Still deferred for TypeScript (tracked, not blocking openai-style
+workflows): `withRawResponse` / `asResponse` (openai-node's
+`APIPromise<T>` design — a `Promise` subclass returned by every
+method, not Python's wrapper-class pattern; a runtime-wide change
+deferred to a later release), and MCP server emit from the TS path.
+Python remains at feature-parity with what Stainless generated for
+openai-python.
+
 ## [0.5.0] — 2026-05-21
 
 **TypeScript ships.** One `stainless.yml` now emits a working SDK in
